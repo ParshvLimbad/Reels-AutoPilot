@@ -14,7 +14,7 @@ DB_PATH = CURRENT_DIR + '..'+os.sep+'database' + os.sep + 'sqlite.db'
 DOWNLOAD_DIR = CURRENT_DIR + '..'+os.sep+'downloads' + os.sep  # Path of folder where files will be stored
 
 #IS REMOVE FILES
-IS_REMOVE_FILES = 1
+IS_REMOVE_FILES = "1"
 
 # Remove Posted Files Interval
 REMOVE_FILE_AFTER_MINS = 120 #every two hours
@@ -24,13 +24,13 @@ REMOVE_FILE_AFTER_MINS = 120 #every two hours
 #--------------------------------------------------------------------------------------------------#
 
 # IS RUN REELS SCRAPER
-IS_ENABLED_REELS_SCRAPER = 1
+IS_ENABLED_REELS_SCRAPER = "1"
 
 # IS RUN AUTO POSTER
-IS_ENABLED_AUTO_POSTER = 1
+IS_ENABLED_AUTO_POSTER = "1"
 
 # IS POST STORY
-IS_POST_TO_STORY = 1
+IS_POST_TO_STORY = "1"
 
 # Fetch LIMIT for scraper script
 FETCH_LIMIT = 10
@@ -55,10 +55,10 @@ ACCOUNTS = [
 ]
 
 # like_and_view_counts_disabled
-LIKE_AND_VIEW_COUNTS_DISABLED = 0
+LIKE_AND_VIEW_COUNTS_DISABLED = "0"
 
 # disable_comments
-DISABLE_COMMENTS = 0
+DISABLE_COMMENTS = "0"
 
 # HASHTAGS to add while Posting
 HASHTAGS = "#reels #shorts #likes #follow #Reels-AutoPilot"
@@ -68,7 +68,7 @@ HASHTAGS = "#reels #shorts #likes #follow #Reels-AutoPilot"
 #--------------------------------------------------------------------------------------------------#
 
 # IS RUN YOUTUBE SCRAPER
-IS_ENABLED_YOUTUBE_SCRAPING = 1
+IS_ENABLED_YOUTUBE_SCRAPING = "1"
 
 
 # IS RUN YOUTUBE SCRAPER
