@@ -47,23 +47,20 @@ Base.metadata.create_all(engine)
 
 class ReelEncoder(json.JSONEncoder):
     def default(self, obj):
-        return {
-            'pk': obj.pk,
-            'id': obj.id,
-            'code': obj.code,
-            'taken_at': obj.taken_at.isoformat(),
-            'media_type': obj.media_type,
-            'image_versions2': obj.image_versions2,
-            'product_type': obj.product_type,
-            'thumbnail_url': obj.thumbnail_url,
-            'location': obj.location,
-            'comment_count': obj.comment_count,
-            'comments_disabled': obj.comments_disabled,
-            'commenting_disabled_for_viewer': obj.commenting_disabled_for_viewer,
-            'like_count': obj.like_count,
-            'play_count': obj.play_count,
-            'has_liked': obj.has_liked,
-            'caption_text': obj.caption_text,
-            'video_url': obj.video_url,
-            'view_count' : obj.view_count
-        }
+        if hasattr(obj, 'dict'):
+            return obj.dict()
+        elif hasattr(obj, 'model_dump'):
+            return obj.model_dump()
+        elif hasattr(obj, 'isoformat'):
+            return obj.isoformat()
+        try:
+            return {
+                'id': str(getattr(obj, 'id', '')),
+                'pk': str(getattr(obj, 'pk', '')),
+                'code': str(getattr(obj, 'code', '')),
+                'caption_text': str(getattr(obj, 'caption_text', '')),
+                'video_url': str(getattr(obj, 'video_url', ''))
+            }
+        except Exception:
+            return str(obj)
+

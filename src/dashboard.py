@@ -65,20 +65,24 @@ def config_table() -> Panel:
     table.add_column("VALUE", style="magenta")
 
     table.add_row("DOWNLOAD_DIR", " "+config.DOWNLOAD_DIR)
-    table.add_row("IS_REMOVE_FILES", ' [green]On[/green]' if config.IS_REMOVE_FILES == 1 else ' [red]Off[/red]')
+    table.add_row("IS_REMOVE_FILES", ' [green]On[/green]' if str(config.IS_REMOVE_FILES) == '1' else ' [red]Off[/red]')
     table.add_row("REMOVE_FILE_AFTER_MINS", " "+str(config.REMOVE_FILE_AFTER_MINS))
-    table.add_row("IS_ENABLED_REELS_SCRAPER", ' [green]On[/green]' if  config.IS_ENABLED_REELS_SCRAPER  else ' [red]Off[/red]')
-    table.add_row("IS_ENABLED_AUTO_POSTER", ' [green]On[/green]' if config.IS_ENABLED_AUTO_POSTER == 1 else ' [red]Off[/red]')
-    table.add_row("IS_POST_TO_STORY ", ' [green]On[/green]' if config.IS_POST_TO_STORY == 1 else ' [red]Off[/red]')
+    table.add_row("IS_ENABLED_REELS_SCRAPER", ' [green]On[/green]' if str(config.IS_ENABLED_REELS_SCRAPER) == '1' else ' [red]Off[/red]')
+    table.add_row("IS_ENABLED_AUTO_POSTER", ' [green]On[/green]' if str(config.IS_ENABLED_AUTO_POSTER) == '1' else ' [red]Off[/red]')
+    table.add_row("IS_POST_TO_STORY ", ' [green]On[/green]' if str(config.IS_POST_TO_STORY) == '1' else ' [red]Off[/red]')
     table.add_row("FETCH_LIMIT", " "+str(config.FETCH_LIMIT))
     table.add_row("POSTING_INTERVAL_IN_MIN", " "+str(config.POSTING_INTERVAL_IN_MIN))
     table.add_row("SCRAPER_INTERVAL_IN_MIN", " "+str(config.SCRAPER_INTERVAL_IN_MIN))
     table.add_row("USERNAME", " "+config.USERNAME)
-    table.add_row("ACCOUNTS", " "+",".join(config.ACCOUNTS))
-    table.add_row("LIKE_AND_VIEW_COUNTS_DISABLED", '[red]Disabled[/red]' if config.LIKE_AND_VIEW_COUNTS_DISABLED == 1 else ' [green]Enabled[/green]' )
-    table.add_row("DISABLE_COMMENTS", ' [red]Disabled[/red]' if  config.DISABLE_COMMENTS ==1 else ' [green]Enabled[/green]' )
-    table.add_row("IS_ENABLED_YOUTUBE_SCRAPING",  ' [green]On[/green]' if config.IS_ENABLED_YOUTUBE_SCRAPING == 1 else ' [red]Off[/red]')
-    table.add_row("CHANNEL_LINKS", " "+",".join(config.CHANNEL_LINKS))
+    table.add_row("ACCOUNTS", " "+",".join(config.ACCOUNTS) if isinstance(config.ACCOUNTS, list) else str(config.ACCOUNTS))
+    table.add_row("CUSTOM_CAPTION", " "+str(getattr(config, 'CUSTOM_CAPTION', '')))
+    table.add_row("REEL_COVER_PATH", " "+str(getattr(config, 'REEL_COVER_PATH', '')))
+    table.add_row("LIKE_AND_VIEW_COUNTS_DISABLED", '[red]Disabled[/red]' if str(config.LIKE_AND_VIEW_COUNTS_DISABLED) == '1' else ' [green]Enabled[/green]' )
+    table.add_row("DISABLE_COMMENTS", ' [red]Disabled[/red]' if str(config.DISABLE_COMMENTS) == '1' else ' [green]Enabled[/green]' )
+    table.add_row("IS_ENABLED_YOUTUBE_SCRAPING", ' [green]On[/green]' if str(config.IS_ENABLED_YOUTUBE_SCRAPING) == '1' else ' [red]Off[/red]')
+    table.add_row("CHANNEL_LINKS", " "+",".join(config.CHANNEL_LINKS) if isinstance(config.CHANNEL_LINKS, list) else str(config.CHANNEL_LINKS))
+
+
 
     message_panel = Panel(
         Align.left(
@@ -208,13 +212,12 @@ def update_live():
 
 
 # Display the live view and update it periodically
-with Live(layout, refresh_per_second=1, screen=True) as live:
-    try:
-        while True:  # infinite loop
-            
-            #time.sleep(1)
-            update_live()
-
-    except KeyboardInterrupt:
-        # Gracefully exit when user presses Ctrl+C
-        console.print("Exiting the app. Bye!", style="green")
+if __name__ == "__main__":
+    with Live(layout, refresh_per_second=1, screen=True) as live:
+        try:
+            while True:  # infinite loop
+                update_live()
+                time.sleep(1)
+        except KeyboardInterrupt:
+            # Gracefully exit when user presses Ctrl+C
+            console.print("Exiting the app. Bye!", style="green")

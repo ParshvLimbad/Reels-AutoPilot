@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Reels AutoPilot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0a1a;--surface:rgba(255,255,255,0.04);--surface2:rgba(255,255,255,0.07);
+  --border:rgba(255,255,255,0.08);--text:#e2e8f0;--text2:#94a3b8;
+  --accent1:#6366f1;--accent2:#8b5cf6;--green:#22c55e;--red:#ef4444;--amber:#f59e0b;
+  --radius:16px;
+}
+html{font-size:15px}
+body{
+  font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);
+  min-height:100vh;padding:0 0 100px;
+  background-image:radial-gradient(ellipse at 20% 0%,rgba(99,102,241,0.08) 0%,transparent 60%),
+                    radial-gradient(ellipse at 80% 100%,rgba(139,92,246,0.06) 0%,transparent 60%);
+}
+.container{max-width:540px;margin:0 auto;padding:20px 16px}
+
+/* Header */
+.header{text-align:center;padding:24px 0 8px}
+.header h1{
+  font-size:1.8rem;font-weight:700;
+  background:linear-gradient(135deg,var(--accent1),var(--accent2),#c084fc);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+}
+.header .sub{font-size:.8rem;color:var(--text2);margin-top:4px;display:flex;align-items:center;justify-content:center;gap:6px}
+.status-dot{width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* Stats */
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:20px 0}
+.stat{
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  padding:16px 12px;text-align:center;backdrop-filter:blur(12px);
+  transition:transform .2s,border-color .2s;
+}
+.stat:hover{transform:translateY(-2px);border-color:rgba(255,255,255,0.15)}
+.stat .num{font-size:1.6rem;font-weight:700;margin-bottom:2px}
+.stat .label{font-size:.7rem;color:var(--text2);text-transform:uppercase;letter-spacing:.5px}
+.stat.green .num{color:var(--green)}
+.stat.amber .num{color:var(--amber)}
+
+/* Cards */
+.card{
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  padding:20px;margin-bottom:14px;backdrop-filter:blur(12px);
+  transition:border-color .2s;
+}
+.card:hover{border-color:rgba(255,255,255,0.12)}
+.card-title{font-size:.85rem;font-weight:600;color:var(--accent1);margin-bottom:16px;text-transform:uppercase;letter-spacing:.8px}
+
+/* Form rows */
+.row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)}
+.row:last-child{border-bottom:none}
+.row-label{font-size:.85rem;color:var(--text);flex:1}
+.row-label small{display:block;font-size:.7rem;color:var(--text2);margin-top:2px}
+
+/* Inputs */
+input[type=text],input[type=password],input[type=number],textarea{
+  background:var(--surface2);border:1px solid var(--border);border-radius:10px;
+  padding:10px 12px;color:var(--text);font-family:'Inter',sans-serif;font-size:.85rem;
+  width:100%;outline:none;transition:border-color .2s;
+}
+input:focus,textarea:focus{border-color:var(--accent1)}
+textarea{resize:vertical;min-height:60px}
+.input-sm{width:80px;text-align:center}
+.input-row{margin-bottom:12px}
+.input-row label{display:block;font-size:.8rem;color:var(--text2);margin-bottom:6px}
+
+/* Password toggle */
+.pw-wrap{position:relative}
+.pw-wrap input{padding-right:40px}
+.pw-toggle{
+  position:absolute;right:10px;top:50%;transform:translateY(-50%);
+  background:none;border:none;color:var(--text2);cursor:pointer;font-size:1rem;
+}
+
+/* Toggle switch */
+.toggle{position:relative;width:44px;height:24px;flex-shrink:0}
+.toggle input{opacity:0;width:0;height:0}
+.toggle .slider{
+  position:absolute;inset:0;background:rgba(255,255,255,0.1);border-radius:24px;
+  cursor:pointer;transition:.3s;
+}
+.toggle .slider:before{
+  content:'';position:absolute;height:18px;width:18px;left:3px;bottom:3px;
+  background:#fff;border-radius:50%;transition:.3s;
+}
+.toggle input:checked+.slider{background:linear-gradient(135deg,var(--accent1),var(--accent2))}
+.toggle input:checked+.slider:before{transform:translateX(20px)}
+
+/* Tags */
+.tags{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+.tag{
+  display:inline-flex;align-items:center;gap:6px;
+  background:var(--surface2);border:1px solid var(--border);border-radius:20px;
+  padding:5px 12px;font-size:.8rem;color:var(--text);
+  animation:fadeIn .3s ease;
+}
+@keyframes fadeIn{from{opacity:0;transform:scale(.9)}to{opacity:1;transform:scale(1)}}
+.tag .remove{
+  background:none;border:none;color:var(--red);cursor:pointer;font-size:1rem;
+  line-height:1;padding:0;opacity:.7;transition:opacity .2s;
+}
+.tag .remove:hover{opacity:1}
+.add-row{display:flex;gap:8px}
+.add-row input{flex:1}
+.btn-add{
+  background:linear-gradient(135deg,var(--accent1),var(--accent2));border:none;
+  color:#fff;border-radius:10px;padding:0 16px;cursor:pointer;font-size:.85rem;
+  font-weight:600;white-space:nowrap;transition:opacity .2s;
+}
+.btn-add:hover{opacity:.85}
+
+/* Save button */
+.save-bar{
+  position:fixed;bottom:0;left:0;right:0;padding:16px;z-index:100;
+  background:linear-gradient(to top,var(--bg) 60%,transparent);
+}
+.btn-save{
+  display:block;width:100%;max-width:540px;margin:0 auto;
+  background:linear-gradient(135deg,var(--accent1),var(--accent2));
+  border:none;color:#fff;border-radius:14px;padding:16px;
+  font-family:'Inter',sans-serif;font-size:1rem;font-weight:700;
+  cursor:pointer;transition:transform .15s,box-shadow .2s;
+  box-shadow:0 4px 24px rgba(99,102,241,0.3);
+  letter-spacing:.3px;
+}
+.btn-save:hover{transform:translateY(-1px);box-shadow:0 6px 30px rgba(99,102,241,0.4)}
+.btn-save:active{transform:translateY(0)}
+.btn-save.saving{opacity:.7;pointer-events:none}
+
+/* Toast */
+.toast{
+  position:fixed;top:20px;left:50%;transform:translateX(-50%) translateY(-100px);
+  padding:12px 24px;border-radius:12px;font-size:.85rem;font-weight:500;
+  z-index:200;transition:transform .4s cubic-bezier(.22,1,.36,1);
+  backdrop-filter:blur(12px);
+}
+.toast.show{transform:translateX(-50%) translateY(0)}
+.toast.success{background:rgba(34,197,94,0.2);border:1px solid rgba(34,197,94,0.3);color:var(--green)}
+.toast.error{background:rgba(239,68,68,0.2);border:1px solid rgba(239,68,68,0.3);color:var(--red)}
+
+/* Recent table */
+.recent-list{width:100%}
+.recent-item{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 0;border-bottom:1px solid var(--border);gap:8px;
+}
+.recent-item:last-child{border-bottom:none}
+.recent-item .ri-left{flex:1;min-width:0}
+.recent-item .ri-code{font-size:.8rem;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.recent-item .ri-acct{font-size:.7rem;color:var(--text2)}
+.badge{
+  font-size:.65rem;font-weight:600;padding:3px 10px;border-radius:20px;
+  text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;
+}
+.badge.posted{background:rgba(34,197,94,0.15);color:var(--green)}
+.badge.pending{background:rgba(245,158,11,0.15);color:var(--amber)}
+.ri-time{font-size:.7rem;color:var(--text2);white-space:nowrap}
+.empty-msg{text-align:center;padding:20px;color:var(--text2);font-size:.85rem}
+</style>
+</head>
+<body>
+
+<div class="container">
+  <!-- Header -->
+  <div class="header">
+    <h1>Reels AutoPilot</h1>
+    <div class="sub"><span class="status-dot"></span> Connected</div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats">
+    <div class="stat"><div class="num" id="s-total">-</div><div class="label">Total</div></div>
+    <div class="stat green"><div class="num" id="s-posted">-</div><div class="label">Posted</div></div>
+    <div class="stat amber"><div class="num" id="s-pending">-</div><div class="label">Pending</div></div>
+  </div>
+
+  <!-- Instagram Settings -->
+  <div class="card">
+    <div class="card-title">Instagram</div>
+    <div class="input-row">
+      <label>Username</label>
+      <input type="text" id="c-USERNAME" placeholder="your_username">
+    </div>
+    <div class="input-row">
+      <label>Password</label>
+      <div class="pw-wrap">
+        <input type="password" id="c-PASSWORD" placeholder="••••••••">
+        <button class="pw-toggle" onclick="togglePw()" id="pw-btn">👁</button>
+      </div>
+    </div>
+    <div class="input-row">
+      <label>Posting Interval (minutes)</label>
+      <input type="number" id="c-POSTING_INTERVAL_IN_MIN" class="input-sm" min="1">
+    </div>
+    <div class="input-row">
+      <label>Scraper Interval (minutes)</label>
+      <input type="number" id="c-SCRAPER_INTERVAL_IN_MIN" class="input-sm" min="1">
+    </div>
+    <div class="input-row">
+      <label>Fetch Limit (reels per account)</label>
+      <input type="number" id="c-FETCH_LIMIT" class="input-sm" min="1">
+    </div>
+  </div>
+
+  <!-- Features -->
+  <div class="card">
+    <div class="card-title">Features</div>
+    <div class="row">
+      <div class="row-label">Reels Scraper<small>Scrape reels from target accounts</small></div>
+      <label class="toggle"><input type="checkbox" id="c-IS_ENABLED_REELS_SCRAPER"><span class="slider"></span></label>
+    </div>
+    <div class="row">
+      <div class="row-label">Auto Poster<small>Automatically post scraped reels</small></div>
+      <label class="toggle"><input type="checkbox" id="c-IS_ENABLED_AUTO_POSTER"><span class="slider"></span></label>
+    </div>
+    <div class="row">
+      <div class="row-label">Post to Story<small>Share reels to your story</small></div>
+      <label class="toggle"><input type="checkbox" id="c-IS_POST_TO_STORY"><span class="slider"></span></label>
+    </div>
+    <div class="row">
+      <div class="row-label">File Cleanup<small>Remove files after posting</small></div>
+      <label class="toggle"><input type="checkbox" id="c-IS_REMOVE_FILES"><span class="slider"></span></label>
+    </div>
+    <div class="row">
+      <div class="row-label">Cleanup After (minutes)</div>
+      <input type="number" id="c-REMOVE_FILE_AFTER_MINS" class="input-sm" min="1">
+    </div>
+    <div class="row">
+      <div class="row-label">Hide Like/View Counts</div>
+      <label class="toggle"><input type="checkbox" id="c-LIKE_AND_VIEW_COUNTS_DISABLED"><span class="slider"></span></label>
+    </div>
+    <div class="row">
+      <div class="row-label">Disable Comments</div>
+      <label class="toggle"><input type="checkbox" id="c-DISABLE_COMMENTS"><span class="slider"></span></label>
+    </div>
+  </div>
+
+  <!-- Content -->
+  <div class="card">
+    <div class="card-title">Content</div>
+    <div class="input-row">
+      <label>Custom Caption</label>
+      <textarea id="c-CUSTOM_CAPTION" placeholder="Caption for all reels (leave empty to use original)"></textarea>
+    </div>
+    <div class="input-row">
+      <label>Hashtags</label>
+      <textarea id="c-HASTAGS" placeholder="#reels #trending (leave empty for none)"></textarea>
+    </div>
+    <div class="input-row">
+      <label>Cover Image Path</label>
+      <input type="text" id="c-REEL_COVER_PATH" placeholder="/path/to/cover.jpg (optional)">
+    </div>
+  </div>
+
+  <!-- Target Accounts -->
+  <div class="card">
+    <div class="card-title">Target Accounts</div>
+    <div class="tags" id="accounts-tags"></div>
+    <div class="add-row">
+      <input type="text" id="account-input" placeholder="@username">
+      <button class="btn-add" onclick="addAccount()">Add</button>
+    </div>
+  </div>
+
+  <!-- YouTube -->
+  <div class="card">
+    <div class="card-title">YouTube</div>
+    <div class="row">
+      <div class="row-label">YouTube Scraper</div>
+      <label class="toggle"><input type="checkbox" id="c-IS_ENABLED_YOUTUBE_SCRAPING"><span class="slider"></span></label>
+    </div>
+    <div class="input-row" style="margin-top:12px">
+      <label>API Key</label>
+      <input type="text" id="c-YOUTUBE_API_KEY" placeholder="YouTube Data API v3 key">
+    </div>
+    <div style="margin-top:12px">
+      <label style="display:block;font-size:.8rem;color:var(--text2);margin-bottom:8px">Channel Links</label>
+      <div class="tags" id="channels-tags"></div>
+      <div class="add-row">
+        <input type="text" id="channel-input" placeholder="https://youtube.com/@channel">
+        <button class="btn-add" onclick="addChannel()">Add</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recent Activity -->
+  <div class="card">
+    <div class="card-title">Recent Activity</div>
+    <div class="recent-list" id="recent-list">
+      <div class="empty-msg">Loading...</div>
+    </div>
+  </div>
+</div>
+
+<!-- Save Bar -->
+<div class="save-bar">
+  <button class="btn-save" id="save-btn" onclick="saveConfig()">Save Configuration</button>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+let accounts = [];
+let channels = [];
+
+// ---- Toast ----
+function toast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast ' + type + ' show';
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// ---- Password toggle ----
+function togglePw() {
+  const inp = document.getElementById('c-PASSWORD');
+  const btn = document.getElementById('pw-btn');
+  if (inp.type === 'password') { inp.type = 'text'; btn.textContent = '🔒'; }
+  else { inp.type = 'password'; btn.textContent = '👁'; }
+}
+
+// ---- Load Config ----
+async function loadConfig() {
+  try {
+    const res = await fetch('/api/config');
+    const cfg = await res.json();
+
+    // Text/number inputs
+    const textFields = ['USERNAME','PASSWORD','POSTING_INTERVAL_IN_MIN','SCRAPER_INTERVAL_IN_MIN',
+      'FETCH_LIMIT','REMOVE_FILE_AFTER_MINS','CUSTOM_CAPTION','HASTAGS','REEL_COVER_PATH','YOUTUBE_API_KEY'];
+    textFields.forEach(k => {
+      const el = document.getElementById('c-' + k);
+      if (el && cfg[k] !== undefined) el.value = cfg[k];
+    });
+
+    // Toggles (value '1' = checked)
+    const toggleFields = ['IS_ENABLED_REELS_SCRAPER','IS_ENABLED_AUTO_POSTER','IS_POST_TO_STORY',
+      'IS_REMOVE_FILES','LIKE_AND_VIEW_COUNTS_DISABLED','DISABLE_COMMENTS','IS_ENABLED_YOUTUBE_SCRAPING'];
+    toggleFields.forEach(k => {
+      const el = document.getElementById('c-' + k);
+      if (el) el.checked = cfg[k] === '1';
+    });
+
+    // Accounts
+    const acctStr = cfg['ACCOUNTS'] || '';
+    accounts = acctStr.split(',').map(s => s.trim()).filter(Boolean);
+    renderTags('accounts-tags', accounts, 'account');
+
+    // Channels
+    const chStr = cfg['CHANNEL_LINKS'] || '';
+    channels = chStr.split(',').map(s => s.trim()).filter(Boolean);
+    renderTags('channels-tags', channels, 'channel');
+
+  } catch (e) {
+    toast('Failed to load config', 'error');
+  }
+}
+
+// ---- Load Stats ----
+async function loadStats() {
+  try {
+    const res = await fetch('/api/stats');
+    const data = await res.json();
+    document.getElementById('s-total').textContent = data.total;
+    document.getElementById('s-posted').textContent = data.posted;
+    document.getElementById('s-pending').textContent = data.pending;
+
+    // Recent reels
+    const list = document.getElementById('recent-list');
+    if (!data.recent || data.recent.length === 0) {
+      list.innerHTML = '<div class="empty-msg">No reels yet</div>';
+      return;
+    }
+    list.innerHTML = data.recent.map(r => `
+      <div class="recent-item">
+        <div class="ri-left">
+          <div class="ri-code">${r.code || '-'}</div>
+          <div class="ri-acct">@${r.account || 'unknown'}</div>
+        </div>
+        <span class="badge ${r.is_posted ? 'posted' : 'pending'}">${r.is_posted ? 'Posted' : 'Pending'}</span>
+        <span class="ri-time">${r.posted_at || '-'}</span>
+      </div>
+    `).join('');
+  } catch (e) {}
+}
+
+// ---- Tags (Accounts & Channels) ----
+function renderTags(containerId, items, type) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = items.map((item, i) => `
+    <span class="tag">${item.replace('@','')}<button class="remove" onclick="removeTag('${type}',${i})">×</button></span>
+  `).join('');
+}
+
+function removeTag(type, idx) {
+  if (type === 'account') { accounts.splice(idx, 1); renderTags('accounts-tags', accounts, 'account'); }
+  else { channels.splice(idx, 1); renderTags('channels-tags', channels, 'channel'); }
+}
+
+function addAccount() {
+  const inp = document.getElementById('account-input');
+  const val = inp.value.trim().replace('@','');
+  if (!val) return;
+  if (!accounts.includes(val)) { accounts.push(val); renderTags('accounts-tags', accounts, 'account'); }
+  inp.value = '';
+}
+
+function addChannel() {
+  const inp = document.getElementById('channel-input');
+  const val = inp.value.trim();
+  if (!val) return;
+  if (!channels.includes(val)) { channels.push(val); renderTags('channels-tags', channels, 'channel'); }
+  inp.value = '';
+}
+
+// Enter key to add
+document.getElementById('account-input').addEventListener('keydown', e => { if (e.key === 'Enter') addAccount(); });
+document.getElementById('channel-input').addEventListener('keydown', e => { if (e.key === 'Enter') addChannel(); });
+
+// ---- Save ----
+async function saveConfig() {
+  const btn = document.getElementById('save-btn');
+  btn.classList.add('saving');
+  btn.textContent = 'Saving...';
+
+  const data = {};
+
+  // Text/number fields
+  ['USERNAME','PASSWORD','POSTING_INTERVAL_IN_MIN','SCRAPER_INTERVAL_IN_MIN',
+   'FETCH_LIMIT','REMOVE_FILE_AFTER_MINS','CUSTOM_CAPTION','HASTAGS','REEL_COVER_PATH','YOUTUBE_API_KEY'
+  ].forEach(k => {
+    const el = document.getElementById('c-' + k);
+    if (el) data[k] = el.value;
+  });
+
+  // Toggles
+  ['IS_ENABLED_REELS_SCRAPER','IS_ENABLED_AUTO_POSTER','IS_POST_TO_STORY',
+   'IS_REMOVE_FILES','LIKE_AND_VIEW_COUNTS_DISABLED','DISABLE_COMMENTS','IS_ENABLED_YOUTUBE_SCRAPING'
+  ].forEach(k => {
+    const el = document.getElementById('c-' + k);
+    if (el) data[k] = el.checked ? '1' : '0';
+  });
+
+  // Lists
+  data['ACCOUNTS'] = accounts.join(',');
+  data['CHANNEL_LINKS'] = channels.join(',');
+
+  try {
+    const res = await fetch('/api/config', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(data),
+    });
+    const result = await res.json();
+    if (result.status === 'ok') {
+      toast('Configuration saved!', 'success');
+    } else {
+      toast(result.message || 'Save failed', 'error');
+    }
+  } catch (e) {
+    toast('Network error', 'error');
+  }
+
+  btn.classList.remove('saving');
+  btn.textContent = 'Save Configuration';
+}
+
+// ---- Init ----
+loadConfig();
+loadStats();
+setInterval(loadStats, 30000);
+</script>
+</body>
+</html>

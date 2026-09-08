@@ -1,3 +1,9 @@
+import sys
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
+
 import os
 import subprocess
 import threading
@@ -15,7 +21,7 @@ from db import Session, Config
 import helpers as Helper
 from datetime import datetime
 import auth
-import sys
+
 
 
 def make_layout() -> Layout:
@@ -51,6 +57,9 @@ def config_table() -> Panel:
     table.add_row(" PASSWORD ", " Instagram Password ")
     table.add_row(" ACCOUNTS ", " Give list of accounts which you want to scrape Ex. carrayminati,totalgaming_official comma separated ")
     table.add_row(" HASTAGS ", " Enter hashtags which you want to add while auto posting ")
+    table.add_row(" CUSTOM_CAPTION ", " Enter custom description/caption for all reels (optional) ")
+    table.add_row(" REEL_COVER_PATH ", " Enter path to custom cover image file to use for all reels (optional) ")
+
     table.add_row(" LIKE_AND_VIEW_COUNTS_DISABLED ", ' [red]1=Disabled[/red] ; [green]0=Enabled[/green] Switch to turn On or Off Likes and view counts ' )
     table.add_row(" DISABLE_COMMENTS ", ' [red]1=Disabled[/red] ; [green]0=Enabled[/green] Switch to turn On or Off comments ' )
     table.add_row(" IS_ENABLED_YOUTUBE_SCRAPING ",  ' [green]1=On[/green] ; [red]0=Off[/red] Switch to turn On or Off YouTube scraper ')
@@ -175,11 +184,14 @@ if setup == 'y' :
             else:
                 print("  [red]Invalid input. Please enter password.[/red]")
 
+        session_path = os.path.join(mainConfig.BASE_DIR, 'session.json')
         try:
-            os.remove('session.json')
-            print(f"File session.json has been removed successfully.")
+            if os.path.exists(session_path):
+                os.remove(session_path)
+                print(f"File session.json has been removed successfully.")
         except OSError as e:
             print(f"Error: {e}")
+
 
         auth.login()
 
@@ -188,6 +200,13 @@ if setup == 'y' :
 
         mainConfig.HASTAGS = input("  (HASTAGS) Enter hashtags which you want to add while posting :")
         Helper.save_config('HASTAGS',mainConfig.HASTAGS)
+
+        mainConfig.CUSTOM_CAPTION = input("  (CUSTOM_CAPTION) Enter custom description/caption for all reels (optional, press Enter to skip) :")
+        Helper.save_config('CUSTOM_CAPTION',mainConfig.CUSTOM_CAPTION)
+
+        mainConfig.REEL_COVER_PATH = input("  (REEL_COVER_PATH) Enter path to custom cover image file for all reels (optional, press Enter to skip) :")
+        Helper.save_config('REEL_COVER_PATH',mainConfig.REEL_COVER_PATH)
+
 
         while True:
             mainConfig.LIKE_AND_VIEW_COUNTS_DISABLED = input("  (LIKE_AND_VIEW_COUNTS_DISABLED) Enter 1 to Disable or 0 to enable like and views counts :")
@@ -224,4 +243,6 @@ if setup == 'y' :
 
 
 python_executable_path = sys.executable
-os.system(python_executable_path+" app.py 1")
+app_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.py")
+subprocess.call([python_executable_path, app_path, "1"])
+

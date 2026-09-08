@@ -8,73 +8,76 @@ import helpers as Helper
 from helpers import print
 
 
+import os
+
 #Function to fetch reel from given account
-def get_reels(account,api):
-    user_id = api.user_id_from_username(account)
-    medias = api.user_medias(user_id, config.FETCH_LIMIT)
-    reels = [item for item in medias if (item.product_type == 'clips' , item.media_type == 2)]  # Filter for reels (product_type == 3)
+def get_reels(account, api):
+    account_name = str(account).strip()
+    if not account_name:
+        return []
+    user_id = api.user_id_from_username(account_name)
+    fetch_limit = int(getattr(config, 'FETCH_LIMIT', 10))
+    medias = api.user_medias(user_id, fetch_limit)
+    reels = [item for item in medias if item.media_type == 2]  # Filter for video reels
     return reels
-
-#Function to get file name from URL
-def get_file_name_from_url(url):
-    path = url.split('/')
-    filename = path[-1]
-    return filename.split('?')[0]
-
-
-#Function to get file path
-def get_file_path(file_name):
-    return config.DOWNLOAD_DIR + file_name
 
 
 #Magic Starts Here
 def main(api):
     Helper.load_all_config()
     session = Session()
-    for account in config.ACCOUNTS:
+    accounts = config.ACCOUNTS
+    if isinstance(accounts, str):
+        accounts = [a.strip() for a in accounts.split(",") if a.strip()]
 
-        reels_by_account = get_reels(account,api)
+    for account in accounts:
+        account_name = str(account).strip()
+        if not account_name:
+            continue
+
+        try:
+            reels_by_account = get_reels(account_name, api)
+        except Exception as e:
+            print(f"[red] Error fetching reels for account {account_name}: {e} [/red]")
+            continue
 
         for reel in reels_by_account:
-            #print(f"Reel ID: {reel.id}, Caption: {reel.caption_text}, Url : {reel.video_url}")
-            if reel.video_url != None :
-                try :
+            if reel.video_url != None:
+                try:
                     print('------------------------------------------------------------------------------------')
                     print('Checking if reel : '+reel.code+' already downloaded')
                     exists = session.query(Reel).filter_by(code=reel.code).first()
-                    #exists = False
                     if not exists:
-                        filename = get_file_name_from_url(reel.video_url)
-                        filepath = get_file_path(filename)
-                        
-                        print('Downloading Reel From : ' +account+ ' | Code : '+ reel.code)
-                        api.video_download_by_url(reel.video_url, folder=config.DOWNLOAD_DIR)
+                        print('Downloading Reel From : ' +account_name+ ' | Code : '+ reel.code)
+                        downloaded_path = api.video_download_by_url(reel.video_url, folder=config.DOWNLOAD_DIR)
+                        filepath = str(downloaded_path)
+                        filename = os.path.basename(filepath)
+
                         print('Downloaded Reel Code : ' +reel.code+ ' | Path : '+filepath)
                         print('<---------Database Insert Start--------->')
 
                         reel_db = Reel(
                                     post_id=reel.id,
                                     code=reel.code,
-                                    account = account,
+                                    account = account_name,
                                     caption = reel.caption_text,
                                     file_name = filename,
                                     file_path = filepath,
                                     data = json.dumps(reel, cls=ReelEncoder),
                                     is_posted = False,
-                                    #posted_at = NULL
                                     )
                         session.add(reel_db)
                         session.commit()
                         
                         print('Inserting Record...')
-                        #print('Insert Reel Record : ' + json.dumps(reel, cls=ReelEncoder) )
                         print('<---------Database Insert End--------->')
                     print('------------------------------------------------------------------------------------')
-                except :
-                    # Do Nothing
+                except Exception as e:
+                    print(f"[red] Error downloading/saving reel {reel.code}: {e} [/red]")
                     pass
                 
     session.close()
+
     # time.sleep(int(config.SCRAPER_INTERVAL_IN_MIN)*60)
     # main(api)
 

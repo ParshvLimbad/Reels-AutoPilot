@@ -5,7 +5,8 @@ import config
 import helpers as Helper
 import os
 
-SESSION_FILE = 'session.json'
+SESSION_FILE = os.path.join(config.BASE_DIR, 'session.json')
+
 
 # Login function
 def login() :

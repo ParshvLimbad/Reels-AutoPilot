@@ -4,14 +4,18 @@ import os
 # Global Configurations                                                                            #
 #--------------------------------------------------------------------------------------------------#
 
-# Config Variables
-CURRENT_DIR = os.getcwd() + os.sep
+# Base Directory (repository root)
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # SQLite DB path
-DB_PATH = CURRENT_DIR + '..'+os.sep+'database' + os.sep + 'sqlite.db'
+DB_DIR = os.path.join(BASE_DIR, 'database')
+os.makedirs(DB_DIR, exist_ok=True)
+DB_PATH = os.path.join(DB_DIR, 'sqlite.db')
 
 # Download Path
-DOWNLOAD_DIR = CURRENT_DIR + '..'+os.sep+'downloads' + os.sep  # Path of folder where files will be stored
+DOWNLOAD_DIR = os.path.join(BASE_DIR, 'downloads') + os.sep
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
 
 #IS REMOVE FILES
 IS_REMOVE_FILES = "1"
@@ -36,7 +40,8 @@ IS_POST_TO_STORY = "1"
 FETCH_LIMIT = 10
 
 # Posting interval in Minutes
-POSTING_INTERVAL_IN_MIN = 15  # Every 15 Minutes
+POSTING_INTERVAL_IN_MIN = 10  # Every 10 Minutes
+
 
 # Scraper interval in Minutes
 SCRAPER_INTERVAL_IN_MIN = 720  # Every 12 hours
@@ -60,8 +65,16 @@ LIKE_AND_VIEW_COUNTS_DISABLED = "0"
 # disable_comments
 DISABLE_COMMENTS = "0"
 
-# HASHTAGS to add while Posting
-HASHTAGS = "#reels #shorts #likes #follow #Reels-AutoPilot"
+# HASHTAGS to add while Posting (empty by default)
+HASHTAGS = ""
+
+
+# Custom Description / Caption to use for all Reels (optional)
+CUSTOM_CAPTION = ""
+
+# Path to custom cover image file to use for all Reels (optional)
+REEL_COVER_PATH = ""
+
 
 #--------------------------------------------------------------------------------------------------#
 # Youtube Configurations                                                                           #

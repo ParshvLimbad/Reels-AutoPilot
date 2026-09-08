@@ -1,0 +1,15 @@
+[Unit]
+Description=Reels AutoPilot - Instagram Reels Scraper & Auto Poster
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/reels-autopilot
+ExecStart=/home/pi/reels-autopilot/venv/bin/python src/app.py
+Restart=always
+RestartSec=30
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

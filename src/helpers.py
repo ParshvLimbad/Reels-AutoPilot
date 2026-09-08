@@ -1,6 +1,13 @@
+import sys
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
+
 # DB
 from db import Session, Reel, Config
 from sqlalchemy import desc
+
 
 # Date Time
 from datetime import datetime
@@ -27,7 +34,10 @@ def get_config(key_name) :
     session = Session()
     reel = session.query(Config).filter_by(key=key_name).first()
     session.close()
-    return reel.value
+    if reel:
+        return reel.value
+    return getattr(config, key_name, "")
+
 
 # Get the configuration data from the database
 def get_all_config():
@@ -39,11 +49,12 @@ def get_all_config():
 # Load all Config
 def load_all_config() : 
      for config_val in get_all_config():
-        
-        if config_val.key == "ACCOUNTS" or config_val.key == "CHANNEL_LINKS" :
-            setattr(config, config_val.key, config_val.value.split(","))
+        if config_val.key == "ACCOUNTS" or config_val.key == "CHANNEL_LINKS":
+            setattr(config, config_val.key, [item.strip() for item in config_val.value.split(",") if item.strip()])
         else:
             setattr(config, config_val.key, config_val.value)
+
+
 
 # Save config by key Value
 def save_config(key,value) :
