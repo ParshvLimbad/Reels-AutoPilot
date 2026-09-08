@@ -262,6 +262,15 @@ textarea{resize:vertical;min-height:60px}
     </div>
   </div>
 
+  <!-- Notifications -->
+  <div class="card">
+    <div class="card-title">Notifications</div>
+    <div class="input-row">
+      <label>Discord Webhook URL</label>
+      <input type="text" id="c-DISCORD_WEBHOOK_URL" placeholder="https://discord.com/api/webhooks/...">
+    </div>
+  </div>
+
   <!-- Target Accounts -->
   <div class="card">
     <div class="card-title">Target Accounts</div>
@@ -338,7 +347,7 @@ async function loadConfig() {
 
     // Text/number inputs
     const textFields = ['USERNAME','PASSWORD','POSTING_INTERVAL_IN_MIN','SCRAPER_INTERVAL_IN_MIN',
-      'FETCH_LIMIT','REMOVE_FILE_AFTER_MINS','CUSTOM_CAPTION','HASTAGS','REEL_COVER_PATH','YOUTUBE_API_KEY'];
+      'FETCH_LIMIT','REMOVE_FILE_AFTER_MINS','CUSTOM_CAPTION','HASTAGS','REEL_COVER_PATH','YOUTUBE_API_KEY','DISCORD_WEBHOOK_URL'];
     textFields.forEach(k => {
       const el = document.getElementById('c-' + k);
       if (el && cfg[k] !== undefined) el.value = cfg[k];
@@ -438,7 +447,7 @@ async function saveConfig() {
 
   // Text/number fields
   ['USERNAME','PASSWORD','POSTING_INTERVAL_IN_MIN','SCRAPER_INTERVAL_IN_MIN',
-   'FETCH_LIMIT','REMOVE_FILE_AFTER_MINS','CUSTOM_CAPTION','HASTAGS','REEL_COVER_PATH','YOUTUBE_API_KEY'
+   'FETCH_LIMIT','REMOVE_FILE_AFTER_MINS','CUSTOM_CAPTION','HASTAGS','REEL_COVER_PATH','YOUTUBE_API_KEY','DISCORD_WEBHOOK_URL'
   ].forEach(k => {
     const el = document.getElementById('c-' + k);
     if (el) data[k] = el.value;

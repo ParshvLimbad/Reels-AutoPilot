@@ -1,4 +1,5 @@
 import os
+import requests as req
 from instagrapi import Client
 from instagrapi.types import StoryMention, StoryMedia, StoryLink, StoryHashtag
 from db import Session, Reel, ReelEncoder
@@ -18,6 +19,31 @@ def console_print(message):
     """Print to both console (rich) and log file."""
     builtins.print(message)
     log_print(message)
+
+def notify_discord(reel_code, account, caption=""):
+    """Send a Discord webhook notification on successful post."""
+    webhook_url = Helper.get_config('DISCORD_WEBHOOK_URL') or getattr(config, 'DISCORD_WEBHOOK_URL', '')
+    if not webhook_url or not webhook_url.strip():
+        return
+    try:
+        reel_url = f"https://www.instagram.com/reel/{reel_code}/"
+        payload = {
+            "embeds": [{
+                "title": "\u2705 Reel Posted!",
+                "description": f"**@{account}** \u2192 posted to Instagram",
+                "color": 5763719,
+                "fields": [
+                    {"name": "Reel", "value": f"[{reel_code}]({reel_url})", "inline": True},
+                    {"name": "Source", "value": f"@{account}", "inline": True},
+                ],
+                "footer": {"text": "Reels AutoPilot"}
+            }]
+        }
+        if caption and caption.strip():
+            payload["embeds"][0]["fields"].append({"name": "Caption", "value": caption[:200], "inline": False})
+        req.post(webhook_url.strip(), json=payload, timeout=10)
+    except Exception as e:
+        log_print(f"Discord notify error: {e}")
 
 # Trim Video for story
 def trim_video(file_path, output_path, max_duration=15):
@@ -142,6 +168,7 @@ def main(api):
         if media and getattr(media, 'pk', None):
             update_status(reel.code)
             console_print(f"  POSTED Reel {reel.code} to Instagram (pk={media.pk})")
+            notify_discord(reel.code, reel.account, full_caption)
 
             if str(config.IS_POST_TO_STORY) == "1":
                 try:

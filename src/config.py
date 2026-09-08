@@ -98,4 +98,5 @@ CHANNEL_LINKS = [
     "https://www.youtube.com/@exampleChannleName."
 ]
 
-
+# Discord Webhook URL for post notifications (optional)
+DISCORD_WEBHOOK_URL = ""
