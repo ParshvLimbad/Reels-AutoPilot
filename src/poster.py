@@ -74,10 +74,6 @@ def get_reel():
         if reel.file_path and os.path.exists(reel.file_path):
             session.close()
             return reel
-        else:
-            console_print(f"  Video file missing for reel code {reel.code}. Skipping.")
-            reel.is_posted = True
-            session.commit()
     session.close()
     return None
 
