@@ -3,6 +3,7 @@ import requests as req
 from instagrapi import Client
 from instagrapi.types import StoryMention, StoryMedia, StoryLink, StoryHashtag
 from db import Session, Reel, ReelEncoder
+from sqlalchemy import desc
 from datetime import datetime
 import config
 import auth
@@ -67,15 +68,39 @@ def update_status(code):
 
 
 # Get Unposted reels from database with valid video file on disk
+# Cycles across accounts round-robin style
 def get_reel():
     session = Session()
     unposted_reels = session.query(Reel).filter_by(is_posted=False).all()
+
+    # Find valid reels grouped by account
+    valid_by_account = {}
     for reel in unposted_reels:
         if reel.file_path and os.path.exists(reel.file_path):
+            acct = reel.account or 'unknown'
+            if acct not in valid_by_account:
+                valid_by_account[acct] = reel
+
+    if not valid_by_account:
+        session.close()
+        return None
+
+    # Find last posted account to rotate away from it
+    last_posted = session.query(Reel).filter_by(is_posted=True).filter(
+        Reel.posted_at != None
+    ).order_by(desc(Reel.posted_at)).first()
+
+    last_account = last_posted.account if last_posted else None
+
+    # Pick a reel from a different account than last posted
+    for acct, reel in valid_by_account.items():
+        if acct != last_account:
             session.close()
             return reel
+
+    # All pending reels are from the same account as last — just pick one
     session.close()
-    return None
+    return next(iter(valid_by_account.values()))
 
 def post_to_story(api,media,media_path):
 
