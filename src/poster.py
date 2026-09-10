@@ -185,6 +185,7 @@ def main(api):
             caption_parts.append(hashtags.strip())
 
         full_caption = "\n\n".join(caption_parts)
+        console_print(f"  Using caption: {repr(full_caption)}")
 
         # Determine reel cover image thumbnail
         cover_path = Helper.get_config('REEL_COVER_PATH') or getattr(config, 'REEL_COVER_PATH', '')

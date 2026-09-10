@@ -131,7 +131,7 @@ def get_stats():
     posted = session.query(Reel).filter_by(is_posted=True).count()
     pending = session.query(Reel).filter_by(is_posted=False).count()
 
-    recent = session.query(Reel).order_by(desc(Reel.posted_at)).limit(10).all()
+    recent = session.query(Reel).order_by(desc(Reel.id)).limit(50).all()
     recent_reels = []
     for r in recent:
         recent_reels.append({
