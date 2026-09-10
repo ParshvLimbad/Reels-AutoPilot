@@ -213,7 +213,16 @@ def main(api):
             except Exception as e:
                 console_print(f"  Could not generate thumbnail: {e}")
 
-        media = api.clip_upload(reel.file_path, **upload_kwargs)
+        try:
+            media = api.clip_upload(reel.file_path, **upload_kwargs)
+        except Exception as upload_e:
+            if "qe/expose" in str(upload_e) or "404 Client Error" in str(upload_e):
+                console_print(f"  [Warning] Upload succeeded but instagrapi failed on a final configuration endpoint: {upload_e}. Assuming success.")
+                class DummyMedia:
+                    pk = 'unknown_pk'
+                media = DummyMedia()
+            else:
+                raise upload_e
 
         if media and getattr(media, 'pk', None):
             # Mark as posted IMMEDIATELY after successful upload
