@@ -10,6 +10,7 @@ if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
 from flask import Flask, jsonify, request, send_from_directory
+from werkzeug.utils import secure_filename
 from db import Session, Config, Reel
 from sqlalchemy import desc
 from datetime import datetime
@@ -86,6 +87,26 @@ def save_config_api():
 
     return jsonify({'status': 'ok', 'message': 'Configuration saved'})
 
+
+@app.route('/api/upload_cover', methods=['POST'])
+def upload_cover_api():
+    if 'cover_image' not in request.files:
+        return jsonify({'status': 'error', 'message': 'No file part'}), 400
+    file = request.files['cover_image']
+    if file.filename == '':
+        return jsonify({'status': 'error', 'message': 'No selected file'}), 400
+    if file:
+        filename = secure_filename(file.filename)
+        # Save to base dir
+        save_path = os.path.join(config.BASE_DIR, filename)
+        file.save(save_path)
+        
+        # Update config
+        db_path = '/home/electro/reels-autopilot/' + filename
+        helpers.save_config('REEL_COVER_PATH', db_path)
+        helpers.load_all_config()
+        
+        return jsonify({'status': 'ok', 'message': 'Cover image uploaded and path updated', 'path': db_path})
 
 @app.route('/api/stats', methods=['GET'])
 def get_stats():

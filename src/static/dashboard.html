@@ -264,6 +264,13 @@ textarea{resize:vertical;min-height:60px}
       <label>Cover Image Path</label>
       <input type="text" id="c-REEL_COVER_PATH" placeholder="/path/to/cover.jpg (optional)">
     </div>
+    <div class="input-row" style="margin-top: 15px; border-top: 1px solid var(--border); padding-top: 15px;">
+      <label>Upload Custom Cover Image</label>
+      <div class="add-row">
+        <input type="file" id="cover-upload-input" accept="image/jpeg, image/png" style="padding: 6px; background: transparent; border: none; font-size: .8rem; color: var(--text2);">
+        <button class="btn-add" onclick="uploadCover()">Upload</button>
+      </div>
+    </div>
   </div>
 
   <!-- Notifications -->
@@ -487,6 +494,35 @@ async function saveConfig() {
 
   btn.classList.remove('saving');
   btn.textContent = 'Save Configuration';
+}
+
+// ---- Upload Cover ----
+async function uploadCover() {
+  const input = document.getElementById('cover-upload-input');
+  if (!input.files || input.files.length === 0) {
+    toast('Please select an image file first', 'error');
+    return;
+  }
+  const file = input.files[0];
+  const formData = new FormData();
+  formData.append('cover_image', file);
+
+  try {
+    const res = await fetch('/api/upload_cover', {
+      method: 'POST',
+      body: formData
+    });
+    const result = await res.json();
+    if (result.status === 'ok') {
+      toast('Cover image uploaded successfully!', 'success');
+      document.getElementById('c-REEL_COVER_PATH').value = result.path;
+      input.value = '';
+    } else {
+      toast(result.message || 'Upload failed', 'error');
+    }
+  } catch (e) {
+    toast('Network error during upload', 'error');
+  }
 }
 
 // ---- Init ----

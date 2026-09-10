@@ -72,7 +72,7 @@ def update_status(code):
 # Cycles across accounts round-robin style
 def get_reel():
     session = Session()
-    unposted_reels = session.query(Reel).filter_by(is_posted=False).all()
+    unposted_reels = session.query(Reel).filter_by(is_posted=False).order_by(Reel.id).all()
 
     # Find valid reels grouped by account
     valid_by_account = {}
@@ -86,22 +86,24 @@ def get_reel():
         session.close()
         return None
 
-    # Find last posted account to rotate away from it
-    last_posted = session.query(Reel).filter_by(is_posted=True).filter(
-        Reel.posted_at != None
-    ).order_by(desc(Reel.posted_at)).first()
+    # For each valid account, find when it last posted
+    last_posted_times = {}
+    for acct in valid_by_account.keys():
+        last_posted = session.query(Reel).filter_by(is_posted=True, account=acct).filter(
+            Reel.posted_at != None
+        ).order_by(desc(Reel.posted_at)).first()
+        
+        last_posted_times[acct] = last_posted.posted_at if last_posted else datetime.min
 
-    last_account = last_posted.account if last_posted else None
+    # Sort accounts by oldest last_posted_at
+    sorted_accounts = sorted(valid_by_account.keys(), key=lambda a: last_posted_times[a])
 
-    # Pick a reel from a different account than last posted
-    for acct, reel in valid_by_account.items():
-        if acct != last_account:
-            session.close()
-            return reel
-
-    # All pending reels are from the same account as last — just pick one
+    # Pick the reel from the account that has waited the longest
+    selected_account = sorted_accounts[0]
+    selected_reel = valid_by_account[selected_account]
+    
     session.close()
-    return next(iter(valid_by_account.values()))
+    return selected_reel
 
 def post_to_story(api,media,media_path):
 

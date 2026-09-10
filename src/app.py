@@ -13,6 +13,8 @@ import auth
 from datetime import datetime, timedelta
 import random
 import traceback
+import purger
+import traceback
 
 
 Helper.load_all_config()
@@ -21,6 +23,7 @@ next_reels_scraper_run_at = datetime.now()
 next_poster_run_at = datetime.now()
 next_remover_run_at = datetime.now()
 next_youtube_run_at = datetime.now()
+next_purge_run_at = datetime.now() + timedelta(hours=10)
 api = None
 
 def ensure_login():
@@ -103,6 +106,16 @@ while True:
                 except Exception as e:
                     print(f"[YouTube] Error: {e}")
                     next_youtube_run_at = datetime.now() + timedelta(seconds=300)
+
+        # 10-hour purge
+        if next_purge_run_at < datetime.now():
+            try:
+                print("[Purger] Running 10-hour scheduled purge...")
+                purger.purge_unposted()
+                next_purge_run_at = datetime.now() + timedelta(hours=10)
+            except Exception as e:
+                print(f"[Purger] Error: {e}")
+                next_purge_run_at = datetime.now() + timedelta(seconds=300)
 
     except Exception as e:
         print(f"[Main] Unexpected error: {type(e).__name__}: {e}")
