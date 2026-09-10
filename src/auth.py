@@ -11,9 +11,19 @@ SESSION_FILE = os.path.join(config.BASE_DIR, 'session.json')
 
 def _inject_session(api, sessionid, ds_user_id=None):
     """Inject session cookies directly, bypassing login API."""
+    import urllib.parse
+    import re
     if not ds_user_id:
-        ds_user_id = sessionid.split('%3A')[0] if '%3A' in sessionid else sessionid.split(':')[0]
+        decoded_session = urllib.parse.unquote(sessionid)
+        # Extract just the digits at the start of the session string
+        match = re.search(r'^(\d+)', decoded_session)
+        if match:
+            ds_user_id = match.group(1)
+        else:
+            ds_user_id = sessionid.split('%')[0].split(':')[0]
     
+    # Ensure ds_user_id contains only digits
+    ds_user_id = re.sub(r'\D', '', str(ds_user_id))
     api.set_settings({
         "uuids": {
             "phone_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
