@@ -9,7 +9,13 @@ import config
 import auth
 import time
 import helpers as Helper
-from moviepy.editor import VideoFileClip
+try:
+    # MoviePy v2+
+    from moviepy import VideoFileClip
+except ImportError:
+    # MoviePy v1
+    from moviepy.editor import VideoFileClip
+
 import logging
 logging.getLogger("moviepy").setLevel(logging.ERROR)
 
