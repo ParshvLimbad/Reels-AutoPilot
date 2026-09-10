@@ -199,6 +199,10 @@ textarea{resize:vertical;min-height:60px}
       </div>
     </div>
     <div class="input-row">
+      <label>Session ID <small style="color:var(--text2)">(from Chrome cookies, fallback if login fails)</small></label>
+      <input type="text" id="c-SESSIONID" placeholder="Paste sessionid cookie here if challenge blocks login">
+    </div>
+    <div class="input-row">
       <label>Posting Interval (minutes)</label>
       <input type="number" id="c-POSTING_INTERVAL_IN_MIN" class="input-sm" min="1">
     </div>
@@ -347,7 +351,7 @@ async function loadConfig() {
 
     // Text/number inputs
     const textFields = ['USERNAME','PASSWORD','POSTING_INTERVAL_IN_MIN','SCRAPER_INTERVAL_IN_MIN',
-      'FETCH_LIMIT','REMOVE_FILE_AFTER_MINS','CUSTOM_CAPTION','HASTAGS','REEL_COVER_PATH','YOUTUBE_API_KEY','DISCORD_WEBHOOK_URL'];
+      'FETCH_LIMIT','REMOVE_FILE_AFTER_MINS','CUSTOM_CAPTION','HASTAGS','REEL_COVER_PATH','YOUTUBE_API_KEY','DISCORD_WEBHOOK_URL','SESSIONID'];
     textFields.forEach(k => {
       const el = document.getElementById('c-' + k);
       if (el && cfg[k] !== undefined) el.value = cfg[k];
@@ -447,7 +451,7 @@ async function saveConfig() {
 
   // Text/number fields
   ['USERNAME','PASSWORD','POSTING_INTERVAL_IN_MIN','SCRAPER_INTERVAL_IN_MIN',
-   'FETCH_LIMIT','REMOVE_FILE_AFTER_MINS','CUSTOM_CAPTION','HASTAGS','REEL_COVER_PATH','YOUTUBE_API_KEY','DISCORD_WEBHOOK_URL'
+   'FETCH_LIMIT','REMOVE_FILE_AFTER_MINS','CUSTOM_CAPTION','HASTAGS','REEL_COVER_PATH','YOUTUBE_API_KEY','DISCORD_WEBHOOK_URL','SESSIONID'
   ].forEach(k => {
     const el = document.getElementById('c-' + k);
     if (el) data[k] = el.value;
