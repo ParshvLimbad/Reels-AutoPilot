@@ -198,6 +198,18 @@ def main(api):
         if thumbnail_file:
             upload_kwargs["thumbnail"] = thumbnail_file
             console_print(f"  Using custom cover image: {thumbnail_file}")
+        else:
+            try:
+                # Generate a thumbnail ourselves to bypass instagrapi's broken internal moviepy code
+                generated_thumb = reel.file_path + ".jpg"
+                if not os.path.exists(generated_thumb):
+                    clip = VideoFileClip(reel.file_path)
+                    clip.save_frame(generated_thumb, t=(clip.duration / 2.0))
+                    clip.close()
+                upload_kwargs["thumbnail"] = generated_thumb
+                console_print(f"  Generated thumbnail: {generated_thumb}")
+            except Exception as e:
+                console_print(f"  Could not generate thumbnail: {e}")
 
         media = api.clip_upload(reel.file_path, **upload_kwargs)
 
