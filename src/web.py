@@ -14,6 +14,7 @@ from werkzeug.utils import secure_filename
 from db import Session, Config, Reel
 from sqlalchemy import desc
 from datetime import datetime
+import subprocess
 import config
 import helpers
 
@@ -107,6 +108,21 @@ def upload_cover_api():
         helpers.load_all_config()
         
         return jsonify({'status': 'ok', 'message': 'Cover image uploaded and path updated', 'path': db_path})
+
+@app.route('/api/purge_rescrape', methods=['POST'])
+def purge_and_rescrape():
+    try:
+        # Run the purger script
+        purger_cmd = ['/home/electro/reels-autopilot/venv/bin/python3', '/home/electro/reels-autopilot/src/purger.py']
+        subprocess.run(purger_cmd, check=True)
+        
+        # Restart the autopilot service to trigger an immediate rescrape
+        restart_cmd = 'echo electro | sudo -S systemctl restart reels-autopilot'
+        subprocess.run(restart_cmd, shell=True, check=True)
+        
+        return jsonify({'status': 'ok', 'message': 'Successfully purged unposted reels and triggered a fresh scrape!'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Failed to purge: {str(e)}'}), 500
 
 @app.route('/api/stats', methods=['GET'])
 def get_stats():

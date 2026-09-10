@@ -178,10 +178,16 @@ textarea{resize:vertical;min-height:60px}
   </div>
 
   <!-- Stats -->
-  <div class="stats">
+  <div class="stats" style="margin-bottom: 5px;">
     <div class="stat"><div class="num" id="s-total">-</div><div class="label">Total</div></div>
     <div class="stat green"><div class="num" id="s-posted">-</div><div class="label">Posted</div></div>
     <div class="stat amber"><div class="num" id="s-pending">-</div><div class="label">Pending</div></div>
+  </div>
+  
+  <div style="display: flex; justify-content: flex-end; margin-bottom: 20px;">
+    <button onclick="purgeAndRescrape()" id="purge-btn" style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: var(--red); padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: all 0.2s;">
+      Purge & Rescrape
+    </button>
   </div>
 
   <!-- Instagram Settings -->
@@ -522,6 +528,32 @@ async function uploadCover() {
     }
   } catch (e) {
     toast('Network error during upload', 'error');
+  }
+}
+
+// ---- Purge & Rescrape ----
+async function purgeAndRescrape() {
+  const btn = document.getElementById('purge-btn');
+  if (!confirm("Are you sure you want to purge all unposted videos and restart the scraper?")) return;
+  
+  btn.style.opacity = '0.5';
+  btn.style.pointerEvents = 'none';
+  toast('Purging and restarting... please wait.', 'success');
+  
+  try {
+    const res = await fetch('/api/purge_rescrape', { method: 'POST' });
+    const result = await res.json();
+    if (result.status === 'ok') {
+      toast(result.message, 'success');
+      setTimeout(() => window.location.reload(), 2000);
+    } else {
+      toast(result.message || 'Purge failed', 'error');
+    }
+  } catch (e) {
+    toast('Network error during purge', 'error');
+  } finally {
+    btn.style.opacity = '1';
+    btn.style.pointerEvents = 'auto';
   }
 }
 
