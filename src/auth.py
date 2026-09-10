@@ -50,7 +50,6 @@ def _inject_session(api, sessionid, ds_user_id=None):
         "ds_user_id": ds_user_id,
         "sessionid": sessionid,
     }
-    api.user_id = int(ds_user_id)
     api.username = config.USERNAME
     return api
 
