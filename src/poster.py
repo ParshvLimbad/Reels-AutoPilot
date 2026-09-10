@@ -145,6 +145,20 @@ def main(api):
         console_print("  No pending reel with valid video file. Skipping.")
         return False
 
+    # Double-check this reel hasn't been posted already (prevent duplicates)
+    session = Session()
+    fresh_reel = session.query(Reel).filter_by(code=reel.code).first()
+    if not fresh_reel or fresh_reel.is_posted:
+        console_print(f"  Reel {reel.code} already posted (race condition avoided). Skipping.")
+        session.close()
+        return False
+    session.close()
+
+    # Verify file still exists right before upload
+    if not os.path.exists(reel.file_path):
+        console_print(f"  File missing for {reel.code}: {reel.file_path}. Skipping.")
+        return False
+
     try:
         console_print(f"  Uploading Reel {reel.code} from @{reel.account}...")
         api.delay_range = [1, 3]
@@ -187,6 +201,7 @@ def main(api):
         media = api.clip_upload(reel.file_path, **upload_kwargs)
 
         if media and getattr(media, 'pk', None):
+            # Mark as posted IMMEDIATELY after successful upload
             update_status(reel.code)
             console_print(f"  POSTED Reel {reel.code} to Instagram (pk={media.pk})")
             notify_discord(reel.code, reel.account, full_caption)
