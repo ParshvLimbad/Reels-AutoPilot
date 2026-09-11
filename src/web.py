@@ -304,6 +304,33 @@ def delete_account_api(username: str):
     return jsonify({"status": "ok", "message": f"Account @{username} removed"})
 
 
+@app.route("/api/accounts/<username>/verify_2fa", methods=["POST"])
+def verify_2fa_api(username: str):
+    """Submit a 6-digit 2FA verification code for an account."""
+    import auth
+    data: Dict[str, Any] = request.json or {}
+    code = str(data.get("code") or "").strip()
+    if not code:
+        return jsonify({"status": "error", "message": "2FA code is required"}), 400
+
+    account = AccountManager.get_account(username)
+    if not account:
+        return jsonify({"status": "error", "message": "Account not found"}), 404
+
+    password = account.password or getattr(config, "PASSWORD", "")
+    api, status, message = auth.login_with_2fa_code(username, password, code)
+    if status == "ok" and api is not None:
+        AccountManager.update_account(username, login_status="ok", is_2fa=1, last_error="")
+        state_accounts = statefile.load_state().get("accounts") or {}
+        if username in state_accounts:
+            state_accounts[username]["login_status"] = "ok"
+            state_accounts[username]["last_error"] = ""
+        return jsonify({"status": "ok", "message": f"@{username} 2FA verification successful!"})
+    else:
+        AccountManager.update_account(username, login_status="2fa", last_error=message)
+        return jsonify({"status": "error", "message": message}), 400
+
+
 @app.route("/api/scrape_status", methods=["GET"])
 def scrape_status_api():
     """Return per source-account scraping statistics."""

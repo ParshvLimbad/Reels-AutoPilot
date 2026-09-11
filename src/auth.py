@@ -402,6 +402,23 @@ def login_account(
     return None, status, message or "all login methods failed"
 
 
+def login_with_2fa_code(username: str, password: str, code: str) -> Tuple[Optional[Client], str, str]:
+    """Log in an account using username, password and a 6-digit 2FA verification code."""
+    session_file = session_path_for(username)
+    api = Client()
+    _apply_unique_device(api, username)
+    try:
+        api.login(username, password, verification_code=str(code).strip())
+        api.get_timeline_feed()
+        dump_session(api, session_file)
+        log.info(f"@{username}: 2FA code login successful!")
+        return api, "ok", "2FA code verification successful"
+    except Exception as exc:
+        message = f"{type(exc).__name__}: {exc}"
+        log.error(f"@{username}: 2FA code login failed: {message}")
+        return None, "2fa", message
+
+
 def login() -> Client:
     """Legacy single-account login (kept for backwards compatibility).
 
