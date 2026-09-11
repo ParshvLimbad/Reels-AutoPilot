@@ -68,6 +68,19 @@ class AccountRuntime:
             update_account(self.username, login_status="ok", last_error="")
             return client
 
+        if status == "transient":
+            # Rate limit / network blip: credentials and session file are fine.
+            # Back off quietly, do not mark the account failed and do not send
+            # a login-failure alert.
+            wait = int(getattr(config, "RATE_LIMIT_BACKOFF_SECONDS", 900))
+            self.login_status = "transient"
+            self.next_login_attempt_at = datetime.now() + timedelta(seconds=wait)
+            log.warning(
+                f"@{self.username}: login deferred after a transient error ({message}). "
+                f"Retrying in {wait}s; session file left intact."
+            )
+            return None
+
         if status == "2fa":
             self.is_2fa = True
             update_account(self.username, is_2fa=1, login_status="2fa", last_error=message)
@@ -102,7 +115,13 @@ class AccountRuntime:
         )
 
     def relogin(self) -> Optional[Client]:
-        """Force a fresh login (used as the retry hook for API calls)."""
+        """Re-establish the client (used as the retry hook for API calls).
+
+        The stored session file is deliberately left in place: `login_account`
+        reuses it first and only re-authenticates when Instagram actually says
+        the session is dead, so a relogin costs no login request in the common
+        case.
+        """
         self.client = None
         return self.ensure_login(force=True)
 
@@ -115,11 +134,13 @@ class AccountRuntime:
         self.last_health_check_at = now
         if self.client is None:
             return self.ensure_login() is not None
+        # is_session_alive() returns True for transient errors, so a 429 or a
+        # dropped connection never triggers a needless re-login.
         if auth.is_session_alive(self.client):
             auth.dump_session(self.client, self.session_file)
             log.debug(f"@{self.username}: session healthy.")
             return True
-        log.warning(f"@{self.username}: session went stale. Re-logging in.")
+        log.warning(f"@{self.username}: session is no longer authenticated. Re-authenticating.")
         return self.relogin() is not None
 
     def to_dict(self) -> Dict[str, object]:

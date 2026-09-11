@@ -84,7 +84,7 @@ class PostingAccount(Base):
     session_file = Column(String)                # path to this account's session.json
     is_enabled = Column(Integer, default=1)
     is_2fa = Column(Integer, default=0)          # skip password login when 2FA is on
-    login_status = Column(String, default="unknown")   # ok | failed | 2fa | challenged
+    login_status = Column(String, default="unknown")   # ok | failed | 2fa | challenged | transient
     last_error = Column(Text)
     challenged_until = Column(DateTime)          # exponential backoff for challenges
     challenge_count = Column(Integer, default=0)
