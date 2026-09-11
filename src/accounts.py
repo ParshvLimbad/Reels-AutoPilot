@@ -26,13 +26,14 @@ class AccountRuntime:
     """In-memory runtime state for one posting account."""
 
     def __init__(self, username: str, password: str = "", session_id: str = "",
-                 session_file: str = "", is_2fa: bool = False) -> None:
+                 session_file: str = "", is_2fa: bool = False, totp_secret: str = "") -> None:
         """Create the runtime holder for a posting account."""
         self.username: str = username
         self.password: str = password or ""
         self.session_id: str = session_id or ""
         self.session_file: str = session_file or auth.session_path_for(username)
         self.is_2fa: bool = bool(is_2fa)
+        self.totp_secret: str = totp_secret or ""
         self.client: Optional[Client] = None
         self.login_status: str = "unknown"
         self.last_error: str = ""
@@ -51,12 +52,17 @@ class AccountRuntime:
         if datetime.now() < self.next_login_attempt_at and not force:
             return None
 
+        # Fetch latest totp_secret from DB if available
+        record = get_account(self.username)
+        totp_sec = self.totp_secret or (record.totp_secret if record else "")
+
         client, status, message = auth.login_account(
             username=self.username,
             password=self.password,
             sessionid=self.session_id,
             session_file=self.session_file,
             is_2fa=self.is_2fa,
+            totp_secret=totp_sec,
         )
         self.login_status = status
         self.last_error = message
@@ -177,6 +183,7 @@ def list_accounts(enabled_only: bool = False) -> List[Dict[str, object]]:
                 "session_file": row.session_file or auth.session_path_for(row.username),
                 "is_enabled": int(row.is_enabled or 0),
                 "is_2fa": int(row.is_2fa or 0),
+                "has_totp_secret": bool(row.totp_secret),
                 "login_status": row.login_status or "unknown",
                 "last_error": row.last_error or "",
                 "last_post_at": row.last_post_at.isoformat() if row.last_post_at else None,
@@ -207,7 +214,7 @@ def get_account(username: str) -> Optional[PostingAccount]:
 
 
 def add_account(username: str, password: str = "", session_id: str = "",
-                is_enabled: int = 1, is_2fa: int = 0) -> Dict[str, object]:
+                totp_secret: str = "", is_enabled: int = 1, is_2fa: int = 0) -> Dict[str, object]:
     """Create or update a posting account."""
     username = (username or "").strip().lstrip("@")
     if not username:
@@ -222,6 +229,7 @@ def add_account(username: str, password: str = "", session_id: str = "",
                 username=username,
                 password=password or "",
                 session_id=session_id or "",
+                totp_secret=totp_secret or "",
                 session_file=auth.session_path_for(username),
                 is_enabled=int(is_enabled),
                 is_2fa=int(is_2fa),
@@ -235,6 +243,8 @@ def add_account(username: str, password: str = "", session_id: str = "",
                 row.password = password
             if session_id:
                 row.session_id = session_id
+            if totp_secret:
+                row.totp_secret = totp_secret
             row.is_enabled = int(is_enabled)
             row.is_2fa = int(is_2fa)
             row.session_file = row.session_file or auth.session_path_for(username)

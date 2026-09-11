@@ -274,6 +274,7 @@ def add_account_api():
             username=username,
             password=str(data.get("password") or ""),
             session_id=str(data.get("session_id") or ""),
+            totp_secret=str(data.get("totp_secret") or "").strip(),
             is_enabled=1 if str(data.get("is_enabled", "1")) in ("1", "True", "true") else 0,
             is_2fa=1 if str(data.get("is_2fa", "0")) in ("1", "True", "true") else 0,
         )

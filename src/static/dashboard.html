@@ -242,6 +242,10 @@ textarea{resize:vertical;min-height:60px}
         <label>Session ID <small style="color:var(--text2)">(Optional Chrome cookie fallback)</small></label>
         <input type="text" id="new-acct-sessionid" placeholder="Paste sessionid cookie if 2FA or challenge active">
       </div>
+      <div class="input-row">
+        <label>2FA Secret Key <small style="color:var(--text2)">(Optional Base32 key for automatic 2FA code generation)</small></label>
+        <input type="text" id="new-acct-totpsecret" placeholder="e.g. JBSW Y3DP EHPK 3PXP">
+      </div>
       <div class="row" style="padding: 6px 0; border: none;">
         <div class="row-label">Enable 2FA Verification Mode<small>Prompt/Handle 2FA code during login</small></div>
         <label class="toggle"><input type="checkbox" id="new-acct-2fa"><span class="slider"></span></label>
@@ -717,6 +721,7 @@ async function submitAddAccount() {
   const username = document.getElementById('new-acct-username').value.trim().replace('@', '');
   const password = document.getElementById('new-acct-password').value.trim();
   const session_id = document.getElementById('new-acct-sessionid').value.trim();
+  const totp_secret = document.getElementById('new-acct-totpsecret').value.trim();
   const is_2fa = document.getElementById('new-acct-2fa').checked ? 1 : 0;
   
   if (!username) {
@@ -728,7 +733,7 @@ async function submitAddAccount() {
     const res = await fetch('/api/accounts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password, session_id, is_2fa, is_enabled: 1 })
+      body: JSON.stringify({ username, password, session_id, totp_secret, is_2fa, is_enabled: 1 })
     });
     const result = await res.json();
     if (result.status === 'ok') {
@@ -736,6 +741,7 @@ async function submitAddAccount() {
       document.getElementById('new-acct-username').value = '';
       document.getElementById('new-acct-password').value = '';
       document.getElementById('new-acct-sessionid').value = '';
+      document.getElementById('new-acct-totpsecret').value = '';
       document.getElementById('new-acct-2fa').checked = false;
       loadPostingAccounts();
     } else {

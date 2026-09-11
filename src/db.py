@@ -82,6 +82,7 @@ class PostingAccount(Base):
     password = Column(String, nullable=False, default="")
     session_id = Column(String)                  # fallback SESSIONID cookie
     session_file = Column(String)                # path to this account's session.json
+    totp_secret = Column(String)                 # Base32 secret for auto 2FA code generation
     is_enabled = Column(Integer, default=1)
     is_2fa = Column(Integer, default=0)          # skip password login when 2FA is on
     login_status = Column(String, default="unknown")   # ok | failed | 2fa | challenged | transient
@@ -132,6 +133,7 @@ def migrate() -> None:
             "last_error": "TEXT",
             "challenged_until": "DATETIME",
             "challenge_count": "INTEGER DEFAULT 0",
+            "totp_secret": "TEXT",
         },
     }
     with engine.begin() as connection:

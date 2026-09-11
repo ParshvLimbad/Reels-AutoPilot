@@ -95,6 +95,32 @@ def device_uuids_for(username: str) -> Dict[str, str]:
     }
 
 
+DEFAULT_BLOKS_VERSIONING_ID = "5c09e3e3b3e5d3fa78c80145c117d0efaa12ff3282b09069"
+
+
+def generate_totp_code(secret_b32: str) -> str:
+    """Generate a 6-digit TOTP verification code (RFC 6238) from a base32 secret."""
+    import base64
+    import hashlib
+    import hmac
+    import struct
+    import time
+
+    clean = str(secret_b32 or "").upper().replace(" ", "").replace("-", "")
+    if not clean:
+        raise ValueError("TOTP secret is empty")
+    missing_padding = len(clean) % 8
+    if missing_padding:
+        clean += "=" * (8 - missing_padding)
+    key = base64.b32decode(clean)
+    counter = int(time.time()) // 30
+    msg = struct.pack(">Q", counter)
+    digest = hmac.new(key, msg, hashlib.sha1).digest()
+    offset = digest[19] & 0x0F
+    code = (struct.unpack(">I", digest[offset : offset + 4])[0] & 0x7FFFFFFF) % 1000000
+    return f"{code:06d}"
+
+
 def _apply_unique_device(api: Client, username: str) -> Client:
     """Give `api` a per-account device fingerprint and sane delays.
 
@@ -104,6 +130,8 @@ def _apply_unique_device(api: Client, username: str) -> Client:
     if api is None:
         return api
     api.delay_range = list(DELAY_RANGE)
+    if not getattr(api, "bloks_versioning_id", None):
+        api.bloks_versioning_id = DEFAULT_BLOKS_VERSIONING_ID
     try:
         api.set_device(dict(DEVICE_SETTINGS))
         api.set_user_agent(USER_AGENT)
