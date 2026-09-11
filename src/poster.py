@@ -83,7 +83,7 @@ def update_status(code: str, posted_by: str = "") -> bool:
 
 
 def get_reel(assigned_to: Optional[str] = None) -> Optional[Reel]:
-    """Return the next unposted reel with a valid file, round-robin by source.
+    """Return the next unposted reel with a valid file, ensuring source rotation.
 
     When `assigned_to` is given, only reels assigned to that posting account
     are considered.
@@ -113,8 +113,37 @@ def get_reel(assigned_to: Optional[str] = None) -> Optional[Reel]:
         if not pool:
             return None
 
+        # Determine last posted source for this posting account (or globally)
+        last_posted_query = session.query(Reel).filter(Reel.is_posted == True, Reel.posted_at != None)  # noqa: E711, E712
+        if assigned_to:
+            last_posted_query = last_posted_query.filter(Reel.posted_by.like(f"%{assigned_to}%"))
+        last_posted_reel = last_posted_query.order_by(desc(Reel.posted_at)).first()
+        last_source = last_posted_reel.account if last_posted_reel else None
+
+        # Filter out last_source if other sources exist in pool
+        other_sources = [s for s in pool.keys() if s != last_source]
+        if other_sources:
+            target_pool = {s: pool[s] for s in other_sources}
+        else:
+            # Check configured target source accounts
+            raw_sources = getattr(config, "ACCOUNTS", [])
+            if isinstance(raw_sources, str):
+                configured_sources = [item.strip() for item in raw_sources.split(",") if item.strip()]
+            else:
+                configured_sources = list(raw_sources)
+
+            # If multiple target accounts are configured, but only last_source has available reels right now,
+            # refrain from posting consecutive reels from the same source page!
+            if len(configured_sources) > 1 and last_source in pool:
+                log.info(
+                    f"[Poster] Skipping consecutive post from @{last_source}. "
+                    f"Waiting for reels from other target pages ({', '.join(configured_sources)})..."
+                )
+                return None
+            target_pool = pool
+
         last_posted_times: Dict[str, datetime] = {}
-        for source in pool:
+        for source in target_pool:
             last_posted = (
                 session.query(Reel)
                 .filter_by(is_posted=True, account=source)
@@ -124,8 +153,8 @@ def get_reel(assigned_to: Optional[str] = None) -> Optional[Reel]:
             )
             last_posted_times[source] = last_posted.posted_at if last_posted else datetime.min
 
-        selected_source = sorted(pool.keys(), key=lambda name: last_posted_times[name])[0]
-        selected = pool[selected_source]
+        selected_source = sorted(target_pool.keys(), key=lambda name: last_posted_times[name])[0]
+        selected = target_pool[selected_source]
         session.expunge(selected)
         return selected
     finally:
