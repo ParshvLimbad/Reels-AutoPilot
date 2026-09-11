@@ -183,6 +183,7 @@ def list_accounts(enabled_only: bool = False) -> List[Dict[str, object]]:
                 "session_file": row.session_file or auth.session_path_for(row.username),
                 "is_enabled": int(row.is_enabled or 0),
                 "is_2fa": int(row.is_2fa or 0),
+                "totp_secret": row.totp_secret or "",
                 "has_totp_secret": bool(row.totp_secret),
                 "login_status": row.login_status or "unknown",
                 "last_error": row.last_error or "",

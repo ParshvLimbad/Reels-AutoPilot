@@ -235,14 +235,28 @@ def get_stats():
 
 @app.route("/api/accounts", methods=["GET"])
 def list_accounts_api():
-    """Return posting accounts with their per-account statistics."""
+    """Return posting accounts with their per-account statistics and live 2FA code."""
+    import time
+    import auth
+
     records = AccountManager.list_accounts()
     counts = distributor.counts_by_account([record["username"] for record in records])
     state_accounts = (statefile.load_state().get("accounts") or {})
+    now_ts = int(time.time())
+    remaining_seconds = 30 - (now_ts % 30)
+
     payload = []
     for record in records:
         username = str(record["username"])
         runtime_state = state_accounts.get(username, {})
+        totp_secret = str(record.get("totp_secret") or "").strip()
+        live_2fa_code = ""
+        if totp_secret:
+            try:
+                live_2fa_code = auth.generate_totp_code(totp_secret)
+            except Exception as exc:
+                log.warning(f"Failed to generate TOTP code for @{username}: {exc}")
+
         payload.append(
             {
                 "username": username,
@@ -250,6 +264,10 @@ def list_accounts_api():
                 "is_2fa": record["is_2fa"],
                 "has_password": bool(record["password"]),
                 "has_session_id": bool(record["session_id"]),
+                "has_totp_secret": bool(totp_secret),
+                "totp_secret": totp_secret,
+                "live_2fa_code": live_2fa_code,
+                "totp_remaining_seconds": remaining_seconds,
                 "login_status": runtime_state.get("login_status") or record["login_status"],
                 "last_error": record["last_error"],
                 "last_post_at": record["last_post_at"],
@@ -259,7 +277,7 @@ def list_accounts_api():
                 "stats": counts.get(username, {"assigned": 0, "posted": 0, "pending": 0}),
             }
         )
-    return jsonify({"accounts": payload})
+    return jsonify({"accounts": payload, "totp_remaining_seconds": remaining_seconds})
 
 
 @app.route("/api/accounts", methods=["POST"])
@@ -285,14 +303,17 @@ def add_account_api():
 
 @app.route("/api/accounts/<username>", methods=["PATCH"])
 def patch_account_api(username: str):
-    """Toggle a posting account on or off."""
+    """Toggle a posting account on or off, or update totp_secret."""
     data: Dict[str, Any] = request.json or {}
+    updates: Dict[str, Any] = {}
     if "is_enabled" in data:
-        AccountManager.set_enabled(username, str(data["is_enabled"]) in ("1", "True", "true"))
+        updates["is_enabled"] = 1 if str(data["is_enabled"]) in ("1", "True", "true") else 0
     if "is_2fa" in data:
-        AccountManager.update_account(
-            username, is_2fa=1 if str(data["is_2fa"]) in ("1", "True", "true") else 0
-        )
+        updates["is_2fa"] = 1 if str(data["is_2fa"]) in ("1", "True", "true") else 0
+    if "totp_secret" in data:
+        updates["totp_secret"] = str(data["totp_secret"]).strip()
+    if updates:
+        AccountManager.update_account(username, **updates)
     return jsonify({"status": "ok", "message": f"Account @{username} updated"})
 
 

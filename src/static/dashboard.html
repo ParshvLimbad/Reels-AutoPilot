@@ -675,11 +675,28 @@ async function loadPostingAccounts() {
             <div>Pending: <span>${stats.pending}</span></div>
           </div>
           ${a.last_error ? `<div style="font-size:0.7rem; color:var(--red); margin-bottom:8px;">Err: ${a.last_error}</div>` : ''}
+
+          ${a.live_2fa_code ? `
+            <div style="margin: 10px 0; padding: 12px 14px; background: rgba(39,131,222,0.15); border: 1px solid rgba(39,131,222,0.35); border-radius: 10px; display: flex; align-items: center; justify-content: space-between;">
+              <div>
+                <div style="font-size:0.7rem; color:var(--text2); text-transform:uppercase; letter-spacing:0.5px; font-weight:700;">🔑 Live 2FA Code (Resets in ${a.totp_remaining_seconds || 30}s)</div>
+                <div style="font-size:1.6rem; font-weight:800; font-family:monospace; letter-spacing:4px; color:#60a5fa; margin-top:2px;">${a.live_2fa_code}</div>
+              </div>
+              <button onclick="navigator.clipboard.writeText('${a.live_2fa_code}'); toast('2FA code copied!', 'success');" style="background:#2783DE; border:none; color:#fff; font-weight:600; padding:8px 14px; border-radius:8px; font-size:0.75rem; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.2);">📋 Copy Code</button>
+            </div>
+          ` : ''}
+
+          <div style="margin: 8px 0; font-size:0.75rem; display:flex; align-items:center; gap:8px;">
+            <span style="color:var(--text2); font-weight:600;">2FA Secret Key:</span>
+            <input type="text" id="edit-secret-${a.username}" placeholder="Paste Base32 Secret Key" value="${a.totp_secret || ''}" class="input-sm" style="flex:1; font-size:0.75rem; padding:4px 8px; font-family:monospace;">
+            <button class="btn-add" onclick="saveTotpSecret('${a.username}')" style="padding:4px 10px; font-size:0.75rem; white-space:nowrap;">Save Key</button>
+          </div>
+
           ${(statusClass === '2fa' || a.is_2fa) ? `
             <div style="margin: 8px 0 10px; padding: 10px; background: rgba(139,92,246,0.1); border: 1px solid rgba(139,92,246,0.25); border-radius: 8px;">
-              <div style="font-size:0.75rem; color:#c084fc; font-weight:600; margin-bottom:6px;">🔑 Submit 2FA Code</div>
+              <div style="font-size:0.75rem; color:#c084fc; font-weight:600; margin-bottom:6px;">🔐 Verify 2FA with Instagram</div>
               <div style="display:flex; gap:8px;">
-                <input type="text" id="2fa-code-${a.username}" placeholder="Enter 6-digit code" class="input-sm" style="flex:1; text-align:left; font-size:0.8rem; padding:6px 10px;">
+                <input type="text" id="2fa-code-${a.username}" value="${a.live_2fa_code || ''}" placeholder="Enter 6-digit code" class="input-sm" style="flex:1; text-align:left; font-size:0.8rem; padding:6px 10px;">
                 <button class="btn-add" onclick="submit2FACode('${a.username}')" style="padding:6px 12px; font-size:0.75rem;">Verify</button>
               </div>
             </div>
@@ -791,6 +808,31 @@ async function toggleAccount2FA(username, is2FA) {
   }
 }
 
+async function saveTotpSecret(username) {
+  const inp = document.getElementById(`edit-secret-${username}`);
+  const totp_secret = inp ? inp.value.trim() : '';
+  if (!totp_secret) {
+    toast('Please enter a 2FA secret key', 'error');
+    return;
+  }
+  try {
+    const res = await fetch(`/api/accounts/${username}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ totp_secret })
+    });
+    const result = await res.json();
+    if (result.status === 'ok') {
+      toast(`2FA Secret Key for @${username} saved!`, 'success');
+      loadPostingAccounts();
+    } else {
+      toast(result.message || 'Failed to save secret key', 'error');
+    }
+  } catch (e) {
+    toast('Network error saving 2FA key', 'error');
+  }
+}
+
 async function deleteAccount(username) {
   if (!confirm(`Are you sure you want to remove posting account @${username}?`)) return;
   try {
@@ -875,7 +917,7 @@ setInterval(() => {
   loadStats();
   loadPostingAccounts();
   fetchDiskAndHealth();
-}, 15000);
+}, 5000);
 </script>
 </body>
 </html>
