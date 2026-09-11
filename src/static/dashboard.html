@@ -164,8 +164,27 @@ textarea{resize:vertical;min-height:60px}
 }
 .badge.posted{background:rgba(34,197,94,0.15);color:var(--green)}
 .badge.pending{background:rgba(245,158,11,0.15);color:var(--amber)}
+.badge.ok{background:rgba(34,197,94,0.15);color:var(--green)}
+.badge.challenged{background:rgba(245,158,11,0.15);color:var(--amber)}
+.badge.2fa{background:rgba(139,92,246,0.15);color:#c084fc}
+.badge.failed{background:rgba(239,68,68,0.15);color:var(--red)}
+.badge.unknown{background:rgba(148,163,184,0.15);color:var(--text2)}
 .ri-time{font-size:.7rem;color:var(--text2);white-space:nowrap}
 .empty-msg{text-align:center;padding:20px;color:var(--text2);font-size:.85rem}
+
+/* Posting Accounts Card */
+.acct-card-item{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px}
+.acct-card-item:last-child{margin-bottom:0}
+.acct-header{display:flex;align-items:center;justify-space-between;margin-bottom:10px}
+.acct-title{font-weight:700;font-size:.95rem;color:var(--text);display:flex;align-items:center;gap:8px}
+.acct-stats-mini{display:flex;gap:12px;font-size:.75rem;color:var(--text2);background:rgba(0,0,0,0.25);padding:8px 12px;border-radius:8px;margin-bottom:10px}
+.acct-stats-mini div span{font-weight:700;color:var(--text)}
+.acct-controls{display:flex;align-items:center;justify-space-between;gap:10px;font-size:.8rem;padding-top:8px;border-top:1px solid var(--border)}
+.btn-danger-sm{background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:var(--red);border-radius:6px;padding:4px 10px;cursor:pointer;font-size:.75rem;font-weight:600;transition:background .2s}
+.btn-danger-sm:hover{background:rgba(239,68,68,0.3)}
+
+/* Log Viewer Box */
+.log-box{background:#05050e;border:1px solid var(--border);border-radius:10px;padding:12px;font-family:monospace;font-size:.75rem;color:#a7f3d0;max-height:220px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
 </style>
 </head>
 <body>
@@ -190,7 +209,50 @@ textarea{resize:vertical;min-height:60px}
     </button>
   </div>
 
-  <!-- Instagram Settings -->
+  <!-- Posting Accounts (Multi-Account Setup) -->
+  <div class="card">
+    <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+      <span>Posting Accounts (Multi-Account)</span>
+      <span class="badge" style="background:rgba(99,102,241,0.2); color:var(--accent1);" id="posting-acct-count">0 Accounts</span>
+    </div>
+    <div style="font-size:0.75rem; color:var(--text2); margin-bottom:14px;">
+      Reels are automatically split across active posting accounts and swapped when exhausted.
+    </div>
+
+    <!-- Active accounts list -->
+    <div id="posting-accounts-list">
+      <div class="empty-msg">Loading posting accounts...</div>
+    </div>
+
+    <!-- Add Account form -->
+    <div style="margin-top:16px; padding-top:14px; border-top:1px solid var(--border);">
+      <div style="font-size:0.8rem; font-weight:600; color:var(--text); margin-bottom:10px;">➕ Add Posting Account</div>
+      <div class="input-row">
+        <label>Instagram Username</label>
+        <input type="text" id="new-acct-username" placeholder="e.g. viewsgimmeviews">
+      </div>
+      <div class="input-row">
+        <label>Password</label>
+        <div class="pw-wrap">
+          <input type="password" id="new-acct-password" placeholder="••••••••">
+          <button class="pw-toggle" onclick="toggleNewPw()" id="new-pw-btn">👁</button>
+        </div>
+      </div>
+      <div class="input-row">
+        <label>Session ID <small style="color:var(--text2)">(Optional Chrome cookie fallback)</small></label>
+        <input type="text" id="new-acct-sessionid" placeholder="Paste sessionid cookie if 2FA or challenge active">
+      </div>
+      <div class="row" style="padding: 6px 0; border: none;">
+        <div class="row-label">Enable 2FA Verification Mode<small>Prompt/Handle 2FA code during login</small></div>
+        <label class="toggle"><input type="checkbox" id="new-acct-2fa"><span class="slider"></span></label>
+      </div>
+      <button class="btn-add" onclick="submitAddAccount()" style="width:100%; padding:12px; margin-top:8px; border-radius:10px;">
+        Add / Save Account
+      </button>
+    </div>
+  </div>
+
+  <!-- Global Instagram Defaults -->
   <div class="card">
     <div class="card-title">Instagram</div>
     <div class="input-row">
@@ -325,6 +387,19 @@ textarea{resize:vertical;min-height:60px}
     <div class="recent-list" id="recent-list">
       <div class="empty-msg">Loading...</div>
     </div>
+  </div>
+
+  <!-- System Status & Logs -->
+  <div class="card">
+    <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+      <span>System Logs & Health</span>
+      <button class="btn-add" onclick="fetchLogs()" style="padding:4px 10px; font-size:0.75rem;">Refresh Logs</button>
+    </div>
+    <div class="row" style="border:none; padding:4px 0 10px;">
+      <div class="row-label">Disk Free Space<small id="disk-info">Checking...</small></div>
+      <div class="row-label" style="text-align:right;">Network Status<small id="network-info">Checking...</small></div>
+    </div>
+    <div class="log-box" id="log-box">Loading backend logs...</div>
   </div>
 </div>
 
@@ -554,13 +629,211 @@ async function purgeAndRescrape() {
   } finally {
     btn.style.opacity = '1';
     btn.style.pointerEvents = 'auto';
+}
+
+// ---- Load Posting Accounts ----
+async function loadPostingAccounts() {
+  try {
+    const res = await fetch('/api/accounts');
+    const data = await res.json();
+    const accounts = data.accounts || [];
+    
+    document.getElementById('posting-acct-count').textContent = accounts.length + (accounts.length === 1 ? ' Account' : ' Accounts');
+    
+    const listEl = document.getElementById('posting-accounts-list');
+    if (accounts.length === 0) {
+      listEl.innerHTML = '<div class="empty-msg">No posting accounts configured yet. Add one below!</div>';
+      return;
+    }
+    
+    listEl.innerHTML = accounts.map(a => {
+      const statusClass = a.login_status || 'unknown';
+      const statusLabel = statusClass === 'ok' ? '✅ Logged In' :
+                          statusClass === 'challenged' ? '⚠️ Challenged' :
+                          statusClass === '2fa' ? '🔐 2FA' :
+                          statusClass === 'failed' ? '❌ Failed' : '❓ ' + statusClass;
+      
+      const stats = a.stats || { assigned: 0, posted: 0, pending: 0 };
+      const recycleTag = a.is_recycling ? ' <span style="color:var(--amber); font-size:0.7rem;">(♻️ Recycling)</span>' : '';
+      
+      return `
+        <div class="acct-card-item">
+          <div class="acct-header">
+            <div class="acct-title">
+              @${a.username}${recycleTag}
+            </div>
+            <span class="badge ${statusClass}">${statusLabel}</span>
+          </div>
+          <div class="acct-stats-mini">
+            <div>Assigned: <span>${stats.assigned}</span></div>
+            <div>Posted: <span>${stats.posted}</span></div>
+            <div>Pending: <span>${stats.pending}</span></div>
+          </div>
+          ${a.last_error ? `<div style="font-size:0.7rem; color:var(--red); margin-bottom:8px;">Err: ${a.last_error}</div>` : ''}
+          <div class="acct-controls">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:0.75rem; color:var(--text2);">Enabled</span>
+              <label class="toggle" style="transform:scale(0.85);">
+                <input type="checkbox" ${a.is_enabled ? 'checked' : ''} onchange="toggleAccountEnabled('${a.username}', this.checked)">
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:0.75rem; color:var(--text2);">2FA</span>
+              <label class="toggle" style="transform:scale(0.85);">
+                <input type="checkbox" ${a.is_2fa ? 'checked' : ''} onchange="toggleAccount2FA('${a.username}', this.checked)">
+                <span class="slider"></span>
+              </label>
+            </div>
+            <button class="btn-danger-sm" onclick="deleteAccount('${a.username}')">Remove</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (e) {
+    console.error('Failed to load posting accounts:', e);
   }
+}
+
+// ---- Add Posting Account ----
+function toggleNewPw() {
+  const inp = document.getElementById('new-acct-password');
+  const btn = document.getElementById('new-pw-btn');
+  if (inp.type === 'password') { inp.type = 'text'; btn.textContent = '🔒'; }
+  else { inp.type = 'password'; btn.textContent = '👁'; }
+}
+
+async function submitAddAccount() {
+  const username = document.getElementById('new-acct-username').value.trim().replace('@', '');
+  const password = document.getElementById('new-acct-password').value.trim();
+  const session_id = document.getElementById('new-acct-sessionid').value.trim();
+  const is_2fa = document.getElementById('new-acct-2fa').checked ? 1 : 0;
+  
+  if (!username) {
+    toast('Username is required', 'error');
+    return;
+  }
+  
+  try {
+    const res = await fetch('/api/accounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, session_id, is_2fa, is_enabled: 1 })
+    });
+    const result = await res.json();
+    if (result.status === 'ok') {
+      toast(result.message, 'success');
+      document.getElementById('new-acct-username').value = '';
+      document.getElementById('new-acct-password').value = '';
+      document.getElementById('new-acct-sessionid').value = '';
+      document.getElementById('new-acct-2fa').checked = false;
+      loadPostingAccounts();
+    } else {
+      toast(result.message || 'Failed to add account', 'error');
+    }
+  } catch (e) {
+    toast('Network error adding account', 'error');
+  }
+}
+
+// ---- Account Toggles & Delete ----
+async function toggleAccountEnabled(username, isEnabled) {
+  try {
+    const res = await fetch(`/api/accounts/${username}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_enabled: isEnabled })
+    });
+    const result = await res.json();
+    if (result.status === 'ok') {
+      toast(`@${username} ${isEnabled ? 'enabled' : 'disabled'}`, 'success');
+      loadPostingAccounts();
+    } else {
+      toast(result.message || 'Update failed', 'error');
+    }
+  } catch (e) {
+    toast('Network error updating account', 'error');
+  }
+}
+
+async function toggleAccount2FA(username, is2FA) {
+  try {
+    const res = await fetch(`/api/accounts/${username}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_2fa: is2FA })
+    });
+    const result = await res.json();
+    if (result.status === 'ok') {
+      toast(`2FA for @${username} ${is2FA ? 'enabled' : 'disabled'}`, 'success');
+      loadPostingAccounts();
+    } else {
+      toast(result.message || 'Update failed', 'error');
+    }
+  } catch (e) {
+    toast('Network error updating account', 'error');
+  }
+}
+
+async function deleteAccount(username) {
+  if (!confirm(`Are you sure you want to remove posting account @${username}?`)) return;
+  try {
+    const res = await fetch(`/api/accounts/${username}`, { method: 'DELETE' });
+    const result = await res.json();
+    if (result.status === 'ok') {
+      toast(`Account @${username} removed`, 'success');
+      loadPostingAccounts();
+    } else {
+      toast(result.message || 'Failed to remove account', 'error');
+    }
+  } catch (e) {
+    toast('Network error removing account', 'error');
+  }
+}
+
+// ---- Logs & Disk Info ----
+async function fetchLogs() {
+  try {
+    const res = await fetch('/api/logs?lines=80');
+    const data = await res.json();
+    const box = document.getElementById('log-box');
+    if (data.lines && data.lines.length > 0) {
+      box.textContent = data.lines.join('\n');
+      box.scrollTop = box.scrollHeight;
+    } else {
+      box.textContent = 'No logs available.';
+    }
+  } catch (e) {
+    document.getElementById('log-box').textContent = 'Failed to load logs.';
+  }
+}
+
+async function fetchDiskAndHealth() {
+  try {
+    const res = await fetch('/api/health');
+    const data = await res.json();
+    if (data.disk) {
+      document.getElementById('disk-info').textContent = `${data.disk.free_mb || 0} MB Free (${data.disk.percent || 0}% used)`;
+    }
+    if (data.network) {
+      const netEl = document.getElementById('network-info');
+      netEl.textContent = data.network.toUpperCase();
+      netEl.style.color = data.network === 'online' ? 'var(--green)' : 'var(--red)';
+    }
+  } catch (e) {}
 }
 
 // ---- Init ----
 loadConfig();
 loadStats();
-setInterval(loadStats, 30000);
+loadPostingAccounts();
+fetchLogs();
+fetchDiskAndHealth();
+setInterval(() => {
+  loadStats();
+  loadPostingAccounts();
+  fetchDiskAndHealth();
+}, 15000);
 </script>
 </body>
 </html>
