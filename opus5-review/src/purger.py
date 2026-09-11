@@ -12,9 +12,7 @@ def purge_unposted():
     """Delete all unposted reels from DB and remove their files from disk."""
     session = Session()
     try:
-        # Only purge truly fresh unposted reels, NOT swapped/recycled ones
         unposted = session.query(Reel).filter_by(is_posted=False).all()
-        unposted = [r for r in unposted if not getattr(r, 'swap_phase', 0) or getattr(r, 'swap_phase', 0) == 0]
         count = 0
         for reel in unposted:
             if reel.file_path and os.path.exists(reel.file_path):

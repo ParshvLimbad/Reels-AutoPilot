@@ -462,10 +462,6 @@ def main() -> None:
             if config.IS_ENABLED_YOUTUBE_SCRAPING == "1" and next_youtube_run_at < datetime.now():
                 try:
                     shorts.main()
-                    # Distribute any new shorts to posting accounts
-                    active_usernames = [r.username for r in pool.active()]
-                    if active_usernames:
-                        distributor.distribute_unassigned(active_usernames)
                     next_youtube_run_at = datetime.now() + timedelta(
                         seconds=int(config.SCRAPER_INTERVAL_IN_MIN) * 60
                     )

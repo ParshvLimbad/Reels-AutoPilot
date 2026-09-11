@@ -1,0 +1,19 @@
+[Unit]
+Description=Reels AutoPilot Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=electro
+WorkingDirectory=/home/electro/reels-autopilot/src
+ExecStart=/home/electro/reels-autopilot/venv/bin/python3 /home/electro/reels-autopilot/src/app.py
+Restart=always
+RestartSec=15
+KillSignal=SIGTERM
+TimeoutStopSec=150
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

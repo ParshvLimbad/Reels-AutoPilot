@@ -146,7 +146,7 @@ def login_account(
         api.delay_range = list(DELAY_RANGE)
         try:
             api.load_settings(session_file)
-            if password and not detected_2fa:
+            if password:
                 api.login(username, password)
             api.get_timeline_feed()
             dump_session(api, session_file)
