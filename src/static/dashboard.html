@@ -654,6 +654,7 @@ async function loadPostingAccounts() {
       const statusLabel = statusClass === 'ok' ? '✅ Logged In' :
                           statusClass === 'challenged' ? '⚠️ Challenged' :
                           statusClass === '2fa' ? '🔐 2FA' :
+                          statusClass === 'transient' ? 'Cooldown' :
                           statusClass === 'failed' ? '❌ Failed' : '❓ ' + statusClass;
       
       const stats = a.stats || { assigned: 0, posted: 0, pending: 0 };
@@ -667,6 +668,7 @@ async function loadPostingAccounts() {
             </div>
             <span class="badge ${statusClass}">${statusLabel}</span>
           </div>
+          ${a.login_status === 'transient' && a.next_login_at ? `<div>Automatic retry after ${escapeHtml(a.next_login_at.replace('T', ' '))} (Pi time)</div>` : ''}
           <div class="acct-stats-mini">
             <div>Assigned: <span>${stats.assigned}</span></div>
             <div>Posted: <span>${stats.posted}</span></div>

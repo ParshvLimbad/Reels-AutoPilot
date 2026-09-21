@@ -299,6 +299,7 @@ def list_accounts_api():
                 "live_2fa_code": live_2fa_code,
                 "totp_remaining_seconds": remaining_seconds,
                 "login_status": record["login_status"],
+                "next_login_at": record["next_login_at"],
                 "last_error": record["last_error"],
                 "last_post_at": record["last_post_at"],
                 "next_post_at": runtime_state.get("next_post_at"),
@@ -366,8 +367,13 @@ def verify_2fa_api(username: str):
 
 
 def queue_auth(username, code=""):
-    if not AccountManager.get_account(username):
+    record = AccountManager.get_account(username)
+    if not record:
         return jsonify({"status": "error", "message": "Account not found"}), 404
+    if (record.login_status == "transient" and record.next_login_at and
+            datetime.now() < record.next_login_at):
+        return jsonify({"status": "error", "message":
+            f"Cooling down. Automatic retry after {record.next_login_at:%Y-%m-%d %H:%M:%S} (Pi time)."}), 429
     with Session() as s:
         s.query(AuthCommand).filter_by(account=username).delete()
         s.add(AuthCommand(account=username, code=code))

@@ -59,6 +59,12 @@ class AccountRuntime:
                     code = command.code or ""
                 session.delete(command)
             session.commit()
+        # Manual requests cannot bypass a persisted API cooldown.
+        if (record and record.login_status == "transient" and
+                record.next_login_at and datetime.now() < record.next_login_at):
+            self.login_status = record.login_status
+            self.next_login_attempt_at = record.next_login_at
+            return None
         if requested:
             self.client = None
             self.next_login_attempt_at = datetime.now()
@@ -253,6 +259,7 @@ def list_accounts(enabled_only: bool = False) -> List[Dict[str, object]]:
                 "totp_secret": row.totp_secret or "",
                 "has_totp_secret": bool(row.totp_secret),
                 "login_status": row.login_status or "unknown",
+                "next_login_at": row.next_login_at.isoformat() if row.next_login_at else None,
                 "last_error": row.last_error or "",
                 "last_post_at": row.last_post_at.isoformat() if row.last_post_at else None,
                 "challenged_until": row.challenged_until.isoformat() if row.challenged_until else None,

@@ -110,6 +110,22 @@ class ReliabilityTests(unittest.TestCase):
             login.assert_not_called()
         with Session() as s:self.assertEqual(s.query(AuthCommand).count(),1)
 
+    def test_resume_cannot_bypass_cooldown(self):
+        runtime = self.account()
+        until = datetime.now() + timedelta(hours=1)
+        accounts.update_account('a', login_status='transient', next_login_at=until)
+        with web.app.test_request_context(json={}):
+            _, status = web.resume_account('a')
+        self.assertEqual(status, 429)
+        with Session() as session:
+            self.assertEqual(session.query(AuthCommand).count(), 0)
+            session.add(AuthCommand(account='a', code='123456'))
+            session.commit()
+        with patch.object(auth, 'login_account') as login:
+            runtime.ensure_login(force=True)
+            login.assert_not_called()
+        self.assertEqual(accounts.get_account('a').next_login_at, until)
+
     def test_delivery_claim_unique_per_destination(self):
         self.assertTrue(delivery.claim('a','r'))
         self.assertFalse(delivery.claim('a','r'))
