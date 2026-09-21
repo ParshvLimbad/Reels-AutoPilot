@@ -202,6 +202,13 @@ class ReliabilityTests(unittest.TestCase):
         with patch('time.time',return_value=59):
             self.assertEqual(auth.generate_totp_code('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ'),'287082')
 
+    def test_supported_client_profile_is_current(self):
+        client = auth.Client()
+        profile = client.get_settings()['device_settings']
+        self.assertGreaterEqual(int(str(profile['app_version']).split('.')[0]), 448)
+        self.assertTrue(profile['version_code'])
+        self.assertTrue(profile['bloks_versioning_id'])
+
 def tearDownModule():
     import logging
     from db import engine
