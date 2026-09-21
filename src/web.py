@@ -71,6 +71,35 @@ def index():
     return send_from_directory(STATIC_DIR, "dashboard.html")
 
 
+@app.route('/official')
+def official_page():
+    return send_from_directory(STATIC_DIR, 'official.html')
+
+@app.route('/api/official/<username>', methods=['GET', 'POST'])
+def official_api(username):
+    import official
+    if not AccountManager.get_account(username):
+        return jsonify(error='Account not found'), 404
+    if request.method == 'GET':
+        return jsonify(official.status(username))
+    data = request.get_json() or {}
+    try:
+        if data.get('token'):
+            official.connect(username, str(data['token']).strip())
+            AccountManager.update_account(username, login_status='official', last_error='', next_login_at=None)
+        elif 'auto' in data:
+            cover = str(data.get('cover', '')).strip()
+            if cover:
+                official.public_url(cover)
+            official.save(official.folder(username) / 'settings.json', {'auto': bool(data['auto']), 'cover': cover})
+        else:
+            official.enqueue(username, str(data.get('video', '')).strip(),
+                str(data.get('cover', '')).strip(), str(data.get('caption', '')))
+        return jsonify(ok=True)
+    except (ValueError, official.APIError) as exc:
+        return jsonify(error=str(exc)), 400
+
+
 @app.route("/api/config", methods=["GET"])
 def get_config_api():
     """Return the merged configuration (DB values over config.py defaults)."""

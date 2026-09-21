@@ -48,6 +48,11 @@ class AccountRuntime:
     # ------------------------------------------------------------------ #
     def ensure_login(self, force: bool = False) -> Optional[Client]:
         """Return a logged-in client, logging in when needed."""
+        import official
+        if official.connected(self.username):
+            self.client = None
+            self.login_status = "official"
+            return None
         record = get_account(self.username)
         code = ""
         requested = False

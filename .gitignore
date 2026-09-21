@@ -143,3 +143,5 @@ configs_export.json
 .pi_maintenance.py
 .maintenance*
 *.zip
+
+.official/

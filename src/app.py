@@ -235,6 +235,13 @@ def post_multi_account(runtimes: List[AccountManager.AccountRuntime]) -> None:
 
     for runtime in ready:
         try:
+            import official
+            if official.connected(runtime.username):
+                success = official.tick(runtime.username)
+                runtime.next_post_at = datetime.now() + timedelta(seconds=posting_interval_seconds() if success else 60)
+                if success:
+                    AccountManager.mark_posted(runtime.username)
+                continue
             client = runtime.ensure_login()
             if client is None:
                 log.warning(f"[Poster] @{runtime.username}: not logged in ({runtime.login_status}). Skipping.")
