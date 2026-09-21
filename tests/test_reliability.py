@@ -160,6 +160,17 @@ class ReliabilityTests(unittest.TestCase):
         with patch.object(module,'service_is_active',return_value=True), patch.object(module,'dashboard_healthy',return_value=True), patch.object(module,'restart_service') as restart:
             module.check_once();restart.assert_not_called()
 
+    def test_watchdog_uses_startup_grace_and_confirming_probe(self):
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('watchdog_grace_test',Path(__file__).resolve().parents[1]/'watchdog.py')
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        module._started_at=module.time.monotonic(); module._dashboard_failures=0
+        with patch.object(module,'service_is_active',return_value=True), patch.object(module,'dashboard_healthy',return_value=False), patch.object(module,'restart_service') as restart:
+            module.check_once(); restart.assert_not_called()
+            module._started_at -= module.STARTUP_GRACE_SECONDS + 1
+            module.check_once(); restart.assert_not_called()
+            module.check_once(); restart.assert_called_once()
+
     def test_expired_session_updates_app_not_device(self):
         p=Path(DATA.name)/'expired.json';p.write_text('{}')
         client=Mock();client.account_info.side_effect=[LoginRequired(),SimpleNamespace(pk=1)]
