@@ -90,6 +90,7 @@ class PostingAccount(Base):
     last_error = Column(Text)
     challenged_until = Column(DateTime)          # exponential backoff for challenges
     challenge_count = Column(Integer, default=0)
+    transient_count = Column(Integer, default=0)
     last_post_at = Column(DateTime)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now)
@@ -165,6 +166,7 @@ def migrate() -> None:
             "last_error": "TEXT",
             "challenged_until": "DATETIME",
             "challenge_count": "INTEGER DEFAULT 0",
+            "transient_count": "INTEGER DEFAULT 0",
             "totp_secret": "TEXT",
         },
     }

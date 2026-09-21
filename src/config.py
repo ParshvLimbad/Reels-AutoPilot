@@ -134,6 +134,7 @@ API_MAX_RETRIES = 4
 API_BACKOFF_BASE_SECONDS = 5               # exponential: 5, 10, 20, 40
 API_BACKOFF_MAX_SECONDS = 600
 RATE_LIMIT_BACKOFF_SECONDS = 900           # 15 min cool-off after HTTP 429
+AUTH_TRANSIENT_BACKOFF_SECONDS = [900, 3600, 14400, 43200]  # 15m, 1h, 4h, 12h after session/API throttles
 SESSION_HEALTHCHECK_INTERVAL_SECONDS = 1800  # 30 minutes
 CHALLENGE_BACKOFF_HOURS = [1, 4, 12, 24]   # exponential backoff for challenged sessions
 SCRAPE_ACCOUNT_DELAY_RANGE = (2, 5)        # seconds between scraping two source accounts

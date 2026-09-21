@@ -98,21 +98,19 @@ class AccountRuntime:
         if status == "ok":
             self.next_login_attempt_at = datetime.now()
             notifier.reset_dedupe(f"login_failed:{self.username}")
-            update_account(self.username, login_status="ok", last_error="", next_login_at=None, challenged_until=None, challenge_count=0)
+            update_account(
+                self.username,
+                login_status="ok",
+                last_error="",
+                next_login_at=None,
+                challenged_until=None,
+                challenge_count=0,
+                transient_count=0,
+            )
             return client
 
         if status == "transient":
-            # Rate limit / network blip: credentials and session file are fine.
-            # Back off quietly, do not mark the account failed and do not send
-            # a login-failure alert.
-            wait = int(getattr(config, "RATE_LIMIT_BACKOFF_SECONDS", 900))
-            self.login_status = "transient"
-            self.next_login_attempt_at = datetime.now() + timedelta(seconds=wait)
-            log.warning(
-                f"@{self.username}: login deferred after a transient error ({message}). "
-                f"Retrying in {wait}s; session file left intact."
-            )
-            update_account(self.username, login_status="transient", last_error=message, next_login_at=self.next_login_attempt_at)
+            self.register_transient(message)
             return None
 
         if status == "2fa":
@@ -129,6 +127,27 @@ class AccountRuntime:
             seconds=int(getattr(config, "LOGIN_FAILURE_RETRY_SECONDS", 300))
         )
         return None
+
+    def register_transient(self, message: str = "") -> None:
+        """Persist exponential cooldown for an inconclusive API/login error."""
+        record = get_account(self.username)
+        count = int((record.transient_count if record else 0) or 0) + 1
+        delay = auth.transient_backoff(count)
+        until = datetime.now() + delay
+        self.login_status = "transient"
+        self.last_error = message
+        self.next_login_attempt_at = until
+        update_account(
+            self.username,
+            login_status="transient",
+            last_error=message,
+            transient_count=count,
+            next_login_at=until,
+        )
+        log.warning(
+            f"@{self.username}: transient session/API error ({message}); "
+            f"retrying after {until:%Y-%m-%d %H:%M:%S} with the session preserved."
+        )
 
     def register_challenge(self, message: str = "") -> None:
         """Mark the session as challenged and back it off exponentially."""
@@ -187,10 +206,13 @@ class AccountRuntime:
             self.register_challenge(self.last_error)
             notifier.alert_login_failed(self.username)
             return
-        self.login_status = "expired" if isinstance(exc, LoginRequired) else "transient"
-        self.next_login_attempt_at = datetime.now() + timedelta(seconds=900)
-        update_account(self.username, login_status=self.login_status,
-                       last_error=self.last_error, next_login_at=self.next_login_attempt_at)
+        if isinstance(exc, LoginRequired):
+            self.login_status = "expired"
+            self.next_login_attempt_at = datetime.now() + timedelta(seconds=900)
+            update_account(self.username, login_status=self.login_status,
+                           last_error=self.last_error, next_login_at=self.next_login_attempt_at)
+            return
+        self.register_transient(self.last_error)
 
 
     def to_dict(self) -> Dict[str, object]:

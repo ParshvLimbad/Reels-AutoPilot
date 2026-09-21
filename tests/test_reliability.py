@@ -9,7 +9,7 @@ os.environ['REELS_DATA_DIR'] = DATA.name
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 import config, auth, accounts, delivery, distributor, poster, reels, remover, statefile, web
 from db import Session, Reel, PostingAccount, Delivery, AuthCommand, Config
-from instagrapi.exceptions import ChallengeRequired, LoginRequired
+from instagrapi.exceptions import ChallengeRequired, ClientThrottledError, LoginRequired
 
 class ReliabilityTests(unittest.TestCase):
     def setUp(self):
@@ -58,6 +58,13 @@ class ReliabilityTests(unittest.TestCase):
             _,status,_=auth.login_account('a','pw',session_file=str(p))
         self.assertEqual(status,'transient');self.assertEqual(p.read_text(),'{}');client.login.assert_not_called()
 
+    def test_client_throttle_preserves_session(self):
+        p=Path(DATA.name)/'throttle.json';p.write_text('{}')
+        client=Mock();client.account_info.side_effect=ClientThrottledError()
+        with patch.object(auth,'Client',return_value=client):
+            _,status,_=auth.login_account('a','pw',session_file=str(p))
+        self.assertEqual(status,'transient');self.assertEqual(p.read_text(),'{}');client.login.assert_not_called()
+
     def test_totp_login_accepts_secret(self):
         client=Mock()
         with patch.object(auth,'Client',return_value=client), patch.object(auth,'dump_session'), patch.object(auth,'generate_totp_code',return_value='123456'):
@@ -78,6 +85,22 @@ class ReliabilityTests(unittest.TestCase):
         with patch.object(auth,'login_account',return_value=(None,'transient','timeout')) as login:
             runtime.ensure_login(); accounts.AccountRuntime('a').ensure_login(force=True)
             self.assertEqual(login.call_count,1)
+
+    def test_transient_backoff_grows_without_erasing_session_state(self):
+        runtime=self.account()
+        with patch.object(auth,'login_account',return_value=(None,'transient','ClientThrottledError')):
+            runtime.ensure_login()
+        first = accounts.get_account('a')
+        self.assertEqual(first.login_status, 'transient')
+        self.assertEqual(first.transient_count, 1)
+        self.assertGreater(first.next_login_at, datetime.now() + timedelta(minutes=14))
+        accounts.update_account('a', next_login_at=datetime.now() - timedelta(seconds=1))
+        runtime.next_login_attempt_at = datetime.now() - timedelta(seconds=1)
+        with patch.object(auth,'login_account',return_value=(None,'transient','ClientThrottledError')):
+            runtime.ensure_login()
+        second = accounts.get_account('a')
+        self.assertEqual(second.transient_count, 2)
+        self.assertGreater(second.next_login_at, datetime.now() + timedelta(minutes=59))
 
     def test_dashboard_queues_2fa_without_network(self):
         self.account()

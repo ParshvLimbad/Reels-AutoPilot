@@ -13,6 +13,7 @@ from instagrapi import Client
 from instagrapi.exceptions import (
     ChallengeRequired,
     ClientError,
+    ClientThrottledError,
     LoginRequired,
     PleaseWaitFewMinutes,
     RateLimitError,
@@ -31,7 +32,7 @@ DELAY_RANGE = [1, 3]
 
 # Errors that must NEVER be treated as a dead session. They are transient,
 # so the stored session file has to survive them untouched.
-TRANSIENT_ERRORS = (RateLimitError, PleaseWaitFewMinutes, OSError)
+TRANSIENT_ERRORS = (RateLimitError, PleaseWaitFewMinutes, ClientThrottledError, OSError)
 
 
 def generate_totp_code(secret_b32: str) -> str:
@@ -168,6 +169,13 @@ def challenge_backoff(challenge_count: int) -> timedelta:
     return timedelta(hours=hours[index])
 
 
+def transient_backoff(transient_count: int) -> timedelta:
+    """Return bounded exponential cooldown for temporary API/session throttles."""
+    seconds = getattr(config, "AUTH_TRANSIENT_BACKOFF_SECONDS", [900, 3600, 14400, 43200])
+    index = min(max(transient_count - 1, 0), len(seconds) - 1)
+    return timedelta(seconds=max(1, int(seconds[index])))
+
+
 def login_account(username: str, password: str = "", sessionid: str = "",
                   session_file: Optional[str] = None, is_2fa: bool = False,
                   totp_secret: str = "", verification_code: str = ""):
@@ -222,7 +230,7 @@ def login_account(username: str, password: str = "", sessionid: str = "",
         return None, "2fa", "A current verification code is required."
     except ChallengeRequired:
         return None, "challenged", "Complete verification in Instagram, then request Resume."
-    except (RateLimitError, PleaseWaitFewMinutes, OSError) as exc:
+    except (RateLimitError, PleaseWaitFewMinutes, ClientThrottledError, OSError) as exc:
         return None, "transient", type(exc).__name__
     except Exception as exc:
         # No cookie fallback or immediate repeated login after a failed attempt.
