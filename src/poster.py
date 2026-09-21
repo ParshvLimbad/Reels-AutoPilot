@@ -9,6 +9,7 @@ from __future__ import annotations
 import builtins
 import logging
 import os
+import subprocess
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 
@@ -22,6 +23,7 @@ from sqlalchemy import desc
 import config
 import diskspace
 import distributor
+import delivery
 import helpers as Helper
 import notifier
 import statefile
@@ -36,8 +38,6 @@ from helpers import print as log_print  # noqa: E402 - preserved public helper
 STORY_MAX_DURATION_SECONDS = 15
 UPLOAD_VERIFY_MEDIA_COUNT = 1
 
-# Fast in-memory guard against double posting within one process
-_posted_codes: set = set()
 # Set while an upload is in flight so shutdown can wait for it
 is_uploading: bool = False
 
@@ -73,14 +73,6 @@ def get_video_duration(file_path: str) -> float:
         clip.close()
 
 
-def update_status(code: str, posted_by: str = "") -> bool:
-    """Mark a reel as posted, recording which account posted it."""
-    success = distributor.mark_posted(code, posted_by)
-    if success:
-        _posted_codes.add(code)
-        distributor.remember_posted_code(code)
-    return success
-
 
 def get_reel(assigned_to: Optional[str] = None) -> Optional[Reel]:
     """Return the next unposted reel with a valid file, ensuring source rotation.
@@ -95,65 +87,33 @@ def get_reel(assigned_to: Optional[str] = None) -> Optional[Reel]:
             query = query.filter(Reel.assigned_to == assigned_to)
         unposted_reels = query.order_by(Reel.id).all()
 
-        recent_codes = set(distributor.get_last_posted_codes())
         valid_by_account: Dict[str, Reel] = {}
-        fallback_by_account: Dict[str, Reel] = {}
         for reel in unposted_reels:
             if not reel.file_path or not os.path.exists(reel.file_path):
                 continue
-            if reel.code in _posted_codes:
+            if assigned_to and delivery.blocked(assigned_to, reel.code):
                 continue
             source = reel.account or "unknown"
-            if reel.code in recent_codes:
-                fallback_by_account.setdefault(source, reel)
-                continue
             valid_by_account.setdefault(source, reel)
 
-        pool = valid_by_account or fallback_by_account
+        pool = valid_by_account
         if not pool:
             return None
 
-        # Determine last posted source for this posting account (or globally)
-        last_posted_query = session.query(Reel).filter(Reel.is_posted == True, Reel.posted_at != None)  # noqa: E711, E712
-        if assigned_to:
-            last_posted_query = last_posted_query.filter(Reel.posted_by.like(f"%{assigned_to}%"))
-        last_posted_reel = last_posted_query.order_by(desc(Reel.posted_at)).first()
-        last_source = last_posted_reel.account if last_posted_reel else None
+        from accounts import get_account
+        record = get_account(assigned_to) if assigned_to else None
+        last_source = record.last_source if record else None
 
-        # Filter out last_source if other sources exist in pool
-        other_sources = [s for s in pool.keys() if s != last_source]
-        if other_sources:
-            target_pool = {s: pool[s] for s in other_sources}
-        else:
-            # Check configured target source accounts
-            raw_sources = getattr(config, "ACCOUNTS", [])
-            if isinstance(raw_sources, str):
-                configured_sources = [item.strip() for item in raw_sources.split(",") if item.strip()]
-            else:
-                configured_sources = list(raw_sources)
-
-            # If multiple target accounts are configured, but only last_source has available reels right now,
-            # refrain from posting consecutive reels from the same source page!
-            if len(configured_sources) > 1 and last_source in pool:
-                log.info(
-                    f"[Poster] Skipping consecutive post from @{last_source}. "
-                    f"Waiting for reels from other target pages ({', '.join(configured_sources)})..."
-                )
-                return None
-            target_pool = pool
-
-        last_posted_times: Dict[str, datetime] = {}
-        for source in target_pool:
-            last_posted = (
-                session.query(Reel)
-                .filter_by(is_posted=True, account=source)
-                .filter(Reel.posted_at != None)  # noqa: E711
-                .order_by(desc(Reel.posted_at))
-                .first()
-            )
-            last_posted_times[source] = last_posted.posted_at if last_posted else datetime.min
-
-        selected_source = sorted(target_pool.keys(), key=lambda name: last_posted_times[name])[0]
+        raw_sources = config.ACCOUNTS
+        sources = [v.strip() for v in raw_sources.split(",") if v.strip()] if isinstance(raw_sources, str) else list(raw_sources)
+        start = sources.index(last_source) + 1 if last_source in sources else 0
+        order = sources[start:] + sources[:start]
+        selected_source = next((v for v in order if v in pool and v != last_source), None)
+        if selected_source is None:
+            selected_source = next(iter(pool))
+            if len(sources) > 1 and selected_source == last_source:
+                log.warning("Other sources unavailable; continuing with available content.")
+        target_pool = pool
         selected = target_pool[selected_source]
         session.expunge(selected)
         return selected
@@ -217,71 +177,14 @@ def build_caption(reel: Reel) -> str:
     return "\n\n".join(parts)
 
 
-def verify_upload(api: Client, reel: Reel) -> bool:
-    """Verify an upload really landed when instagrapi errored after uploading."""
-    try:
-        user_id = api.user_id
-        if not user_id:
-            account_info = api.account_info()
-            user_id = getattr(account_info, "pk", None)
-        if not user_id:
-            log.warning("Upload verification skipped: no user id available.")
-            return False
-        medias = api.user_medias(user_id, UPLOAD_VERIFY_MEDIA_COUNT)
-        if not medias:
-            log.warning("Upload verification: account has no media.")
-            return False
-        latest = medias[0]
-        taken_at = getattr(latest, "taken_at", None)
-        recent = True
-        if taken_at is not None:
-            try:
-                delta = datetime.now(taken_at.tzinfo) - taken_at
-                recent = delta.total_seconds() < 900
-            except (TypeError, ValueError):
-                recent = True
-        log.info(
-            f"Upload verification for {reel.code}: latest media {getattr(latest, 'code', '?')} "
-            f"(recent={recent})"
-        )
-        return bool(recent)
-    except (LoginRequired, ClientError, OSError) as exc:
-        log.warning(f"Upload verification failed: {type(exc).__name__}: {exc}")
-        return False
-
-
 def recover_pending_upload(api: Client, account: str) -> Optional[str]:
-    """Verify an upload that was interrupted by a crash.
-
-    Returns the reel code that was reconciled, if any.
-    """
+    """Quarantine legacy interrupted uploads; never infer success from recency."""
     marker = statefile.read_pending_upload(account)
     if not marker:
         return None
     code = str(marker.get("code") or "")
-    log.warning(f"Found interrupted upload marker for reel {code} (@{account}). Verifying with Instagram...")
-
-    session = Session()
-    try:
-        reel = session.query(Reel).filter_by(code=code).first()
-        if reel is None:
-            statefile.clear_pending_upload(account)
-            return code
-        already_posted = bool(reel.is_posted)
-        session.expunge(reel)
-    finally:
-        session.close()
-
-    if already_posted:
-        statefile.clear_pending_upload(account)
-        return code
-
-    if api is not None and verify_upload(api, reel):
-        log.warning(f"Reel {code} was already live on Instagram. Marking it as posted.")
-        update_status(code, posted_by=account)
-    else:
-        log.info(f"Reel {code} was not posted before the crash. It stays in the queue.")
-    statefile.clear_pending_upload(account)
+    if code and delivery.claim(account, code):
+        delivery.uncertain(account, code, "Legacy interrupted upload; manual reconciliation required")
     return code
 
 
@@ -308,42 +211,15 @@ def _upload(api: Client, reel: Reel, full_caption: str) -> Tuple[Any, bool]:
         try:
             generated_thumb = f"{reel.file_path}.jpg"
             if not os.path.exists(generated_thumb):
-                clip = VideoFileClip(reel.file_path)
-                try:
-                    clip.save_frame(generated_thumb, t=(clip.duration / 2.0))
-                finally:
-                    clip.close()
+                subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-ss", "0",
+                                "-i", reel.file_path, "-frames:v", "1", "-threads", "1", generated_thumb],
+                               check=True, timeout=45, capture_output=True)
             upload_kwargs["thumbnail"] = generated_thumb
             console_print(f"  Generated thumbnail: {generated_thumb}")
-        except (OSError, ValueError, IndexError) as exc:
+        except (OSError, ValueError, IndexError, subprocess.SubprocessError) as exc:
             console_print(f"  Could not generate thumbnail: {exc}")
 
-    try:
-        return api.clip_upload(reel.file_path, **upload_kwargs), True
-    except Exception as upload_error:  # instagrapi raises many unrelated types here
-        message = str(upload_error)
-        post_upload_failure = (
-            "qe/expose" in message
-            or "404" in message
-            or "configure" in message.lower()
-            or "JSONDecodeError" in type(upload_error).__name__
-        )
-        if not post_upload_failure:
-            raise
-        console_print(
-            f"  [Warning] instagrapi failed after uploading ({type(upload_error).__name__}: {message[:200]}). "
-            "Verifying whether the upload actually succeeded..."
-        )
-        verified = verify_upload(api, reel)
-        console_print(f"  Upload verification result for {reel.code}: {'confirmed' if verified else 'unconfirmed'}")
-
-        class DummyMedia:
-            """Placeholder media returned when instagrapi loses the response."""
-
-            pk = "unknown_pk"
-            code = reel.code
-
-        return DummyMedia(), verified
+    return api.clip_upload(reel.file_path, **upload_kwargs), True
 
 
 def post_for_account(api: Client, username: str, story_username: Optional[str] = None) -> bool:
@@ -392,6 +268,8 @@ def post_for_account(api: Client, username: str, story_username: Optional[str] =
         console_print(f"  @{username}: uploading reel {reel.code} from @{reel.account}...")
         console_print(f"  Using caption: {repr(full_caption)}")
 
+        if not delivery.claim(username, reel.code):
+            return False
         statefile.write_pending_upload(username, reel.code, file_path)
         is_uploading = True
         try:
@@ -399,10 +277,15 @@ def post_for_account(api: Client, username: str, story_username: Optional[str] =
             media, verified = _upload(api, reel, full_caption)
 
             if media and getattr(media, "pk", None) and verified:
-                if not update_status(reel.code, posted_by=username):
-                    console_print(f"  [Warning] DB write for {reel.code} could not be verified.")
+                delivery.confirm(username, reel.code, media)
+                from accounts import update_account
+                update_account(username, last_source=reel.account)
+                statefile.clear_pending_upload(username)
                 console_print(f"  POSTED reel {reel.code} as @{username} (pk={media.pk})")
-                notify_discord(reel.code, reel.account, full_caption, posted_by=username)
+                try:
+                    notify_discord(media.code, reel.account, full_caption, posted_by=username)
+                except Exception:
+                    log.warning("Notification failed; confirmed delivery is preserved.")
 
                 if str(config.IS_POST_TO_STORY) == "1" and getattr(media, "code", None):
                     try:
@@ -411,17 +294,19 @@ def post_for_account(api: Client, username: str, story_username: Optional[str] =
                         log.warning(f"Story post warning: {type(story_error).__name__}: {story_error}")
                 return True
 
-            console_print(f"  FAILED: upload of {reel.code} could not be confirmed. Not marked as posted.")
+            delivery.uncertain(username, reel.code, "Upload response missing destination ID")
+            console_print(f"  UNCERTAIN: upload of {reel.code}; held for review.")
             return False
         except (LoginRequired, ClientError) as exc:
+            delivery.uncertain(username, reel.code, type(exc).__name__)
             console_print(f"  FAILED: API error posting {reel.code}: {type(exc).__name__}: {exc}")
             raise
         except Exception as exc:  # keep the loop alive no matter what
+            delivery.uncertain(username, reel.code, type(exc).__name__)
             console_print(f"  FAILED: error posting reel {reel.code}: {type(exc).__name__}: {exc}")
             return False
         finally:
             is_uploading = False
-            statefile.clear_pending_upload(username)
 
 
 def main(api: Client) -> bool:

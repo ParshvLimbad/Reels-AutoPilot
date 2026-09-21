@@ -1,5 +1,5 @@
 import os
-from db import Session, Reel
+from db import Session, Reel, Delivery
 import config
 from helpers import print as log_print
 import builtins
@@ -15,8 +15,11 @@ def purge_unposted():
         # Only purge truly fresh unposted reels, NOT swapped/recycled ones
         unposted = session.query(Reel).filter_by(is_posted=False).all()
         unposted = [r for r in unposted if not getattr(r, 'swap_phase', 0) or getattr(r, 'swap_phase', 0) == 0]
+        held = {r.code for r in session.query(Delivery).all()}
         count = 0
         for reel in unposted:
+            if reel.code in held or reel.posted_by:
+                continue
             if reel.file_path and os.path.exists(reel.file_path):
                 try:
                     os.remove(reel.file_path)

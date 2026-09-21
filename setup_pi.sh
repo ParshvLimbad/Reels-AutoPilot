@@ -1,57 +1,73 @@
-#!/bin/bash
-# Reels AutoPilot - Raspberry Pi Setup Script
-# For Pi Zero 2 W (512MB RAM)
+#!/usr/bin/env bash
+# Reels AutoPilot - Raspberry Pi setup (run as the normal Pi user, not root).
+set -Eeuo pipefail
 
-set -e
+if [[ "$(id -u)" -eq 0 ]]; then
+  echo "Run this script as the normal Pi user; it will use sudo only where needed."
+  exit 1
+fi
 
-echo "=========================================="
-echo "  Reels AutoPilot - Pi Setup"
-echo "=========================================="
+REPO_DIR="${REELS_AUTOPILOT_DIR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)}"
+RUN_USER="$(id -un)"
+VENV_PYTHON="$REPO_DIR/venv/bin/python3"
 
-# Update system
-echo "[1/6] Updating system packages..."
-sudo apt update && sudo apt upgrade -y
+if [[ ! -f "$REPO_DIR/requirements.txt" ]]; then
+  echo "Could not find requirements.txt in $REPO_DIR"
+  exit 1
+fi
 
-# Install Python 3 and dependencies
-echo "[2/6] Installing Python 3 and build tools..."
-sudo apt install -y python3 python3-venv python3-pip python3-dev \
-    libffi-dev libssl-dev git ffmpeg
+sudo apt-get update
+sudo apt-get install -y python3 python3-venv python3-pip python3-dev libffi-dev libssl-dev git ffmpeg
 
-# Create virtual environment
-echo "[3/6] Creating Python virtual environment..."
-cd /home/pi/reels-autopilot
-python3 -m venv venv
-source venv/bin/activate
+cd "$REPO_DIR"
+if [[ ! -x "$VENV_PYTHON" ]]; then
+  python3 -m venv venv
+fi
+"$VENV_PYTHON" -m pip install --upgrade pip
+"$VENV_PYTHON" -m pip install --no-cache-dir -r requirements.txt
 
-# Install Python packages (use --no-cache-dir to save RAM during install)
-echo "[4/6] Installing Python packages (this may take a while on Pi Zero)..."
-pip install --no-cache-dir --upgrade pip
-pip install --no-cache-dir -r requirements.txt
+mkdir -p database downloads sessions state logs covers
 
-# Create required directories
-echo "[5/6] Setting up directories..."
-mkdir -p database downloads
+# The dashboard is intentionally password protected because it can manage
+# posting accounts and display live TOTP codes. The generated credential stays
+# only on the Pi in a mode-600 file.
+if [[ ! -s "$REPO_DIR/.dashboard-password" ]]; then
+  "$VENV_PYTHON" - "$REPO_DIR" <<'PY'
+from pathlib import Path
+import secrets
+import sys
+from werkzeug.security import generate_password_hash
 
-# Install systemd services
-echo "[6/6] Installing systemd services..."
-sudo cp services/reels-autopilot.service /etc/systemd/system/
-sudo cp services/reels-web.service /etc/systemd/system/
+root = Path(sys.argv[1])
+password = secrets.token_urlsafe(18)
+(root / ".dashboard-password").write_text(generate_password_hash(password) + "\n", encoding="utf-8")
+(root / ".dashboard-access.txt").write_text(
+    "Dashboard: http://<pi-ip>:8080\nUsername: admin\nPassword: " + password + "\n",
+    encoding="utf-8",
+)
+(root / ".dashboard-password").chmod(0o600)
+(root / ".dashboard-access.txt").chmod(0o600)
+PY
+  echo "Dashboard credentials were written to $REPO_DIR/.dashboard-access.txt"
+fi
+
+render_service() {
+  local name="$1"
+  local source="$REPO_DIR/systemd/$name.service"
+  local target="/etc/systemd/system/$name.service"
+  local temp
+  temp="$(mktemp)"
+  sed -e "s|__RUN_USER__|$RUN_USER|g" -e "s|__PROJECT_DIR__|$REPO_DIR|g" "$source" > "$temp"
+  sudo install -m 0644 "$temp" "$target"
+  rm -f "$temp"
+}
+
+render_service reels-autopilot
+render_service reels-web
+render_service reels-watchdog
 sudo systemctl daemon-reload
-sudo systemctl enable reels-autopilot.service
-sudo systemctl enable reels-web.service
+sudo systemctl enable --now reels-autopilot reels-web reels-watchdog
 
-echo ""
-echo "=========================================="
-echo "  Setup Complete!"
-echo "=========================================="
-echo ""
-echo "Start the services:"
-echo "  sudo systemctl start reels-autopilot"
-echo "  sudo systemctl start reels-web"
-echo ""
-echo "Dashboard: http://<pi-ip>:8080"
-echo ""
-echo "View logs:"
-echo "  journalctl -u reels-autopilot -f"
-echo "  journalctl -u reels-web -f"
-echo ""
+echo "Setup complete. Dashboard: http://<pi-ip>:8080"
+echo "Credentials: $REPO_DIR/.dashboard-access.txt"
+echo "Logs: journalctl -u reels-autopilot -f"

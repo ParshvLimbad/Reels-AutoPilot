@@ -129,3 +129,17 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Runtime credentials and local maintenance material
+sessions/
+state/
+logs/
+covers/
+database/*.db*
+session*.json
+configs_export.json
+.dashboard-password
+.dashboard-access.txt
+.pi_maintenance.py
+.maintenance*
+*.zip

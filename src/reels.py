@@ -96,18 +96,43 @@ def get_scrape_status() -> List[Dict[str, Any]]:
         session.close()
 
 
-def get_reels(account: str, api: Client) -> List[Any]:
-    """Fetch the latest video reels of one source account."""
-    account_name = str(account).strip()
-    if not account_name:
-        return []
-    user_id = api.user_id_from_username(account_name)
-    fetch_limit = int(getattr(config, "FETCH_LIMIT", 10))
-    medias = api.user_medias(user_id, fetch_limit)
-    return [item for item in medias if item.media_type == 2]  # video reels only
+def get_reels(account: str, api: Client, older: bool = False) -> List[Any]:
+    """Fetch actual clips; advance a bounded archive cursor when exhausted."""
+    user_id = api.user_id_from_username(account.strip())
+    limit = max(1, min(50, int(config.FETCH_LIMIT)))
+    key = "SOURCE_CURSOR_" + account
+    cursor = (Helper.get_config(key) or "") if older else ""
+    medias, next_cursor = api.user_clips_paginated_v1(user_id, amount=limit, end_cursor=cursor)
+    if older or not Helper.get_config(key):
+        Helper.save_config(key, next_cursor or "")
+    return [m for m in medias if m.media_type == 2 and getattr(m, "product_type", "clips") == "clips"]
 
 
-def main(api: Client) -> int:
+def repair_missing_files(api):
+    """Reacquire expired download URLs without losing delivery history."""
+    with Session() as session:
+        rows = session.query(Reel).filter_by(is_posted=False).all()
+        for row in rows[:50]:
+            if row.file_path and os.path.exists(row.file_path):
+                continue
+            import delivery
+            if row.assigned_to and delivery.blocked(row.assigned_to, row.code):
+                continue
+            try:
+                media = api.media_info(row.post_id)
+                if media.video_url:
+                    row.file_path = str(api.video_download_by_url(media.video_url, folder=config.DOWNLOAD_DIR))
+                    row.file_name = os.path.basename(row.file_path)
+                    session.commit()
+            except Exception as exc:
+                session.rollback()
+                if type(exc).__name__ in ("MediaNotFound", "MediaUnavailable", "ClientNotFoundError"):
+                    log.warning("Source media %s is no longer available; skipping file repair.", row.code)
+                    continue
+                raise
+
+
+def main(api: Client, older: bool = False) -> int:
     """Scrape every configured source account. Returns new reels downloaded."""
     Helper.load_all_config()
     accounts = _source_accounts()
@@ -117,6 +142,7 @@ def main(api: Client) -> int:
 
     diskspace.ensure_free_space()
 
+    repair_missing_files(api)
     total_new = 0
     succeeded: List[str] = []
     failed: List[str] = []
@@ -127,7 +153,7 @@ def main(api: Client) -> int:
             time.sleep(random.uniform(float(delay_min), float(delay_max)))
 
         try:
-            reels_by_account = get_reels(account_name, api)
+            reels_by_account = get_reels(account_name, api, older=older)
         except (UserNotFound, PrivateAccount, LoginRequired, ClientError, OSError) as exc:
             error = f"{type(exc).__name__}: {exc}"
             failures = record_scrape_result(account_name, success=False, error=error)
@@ -135,6 +161,8 @@ def main(api: Client) -> int:
             log.error(f"[Scraper] @{account_name} failed ({failures} in a row): {error}")
             if failures >= int(getattr(config, "SCRAPE_FAILURE_ALERT_THRESHOLD", 3)):
                 notifier.alert_scrape_failure(account_name, failures, error)
+            if isinstance(exc, (LoginRequired,)) or type(exc).__name__ in ("ChallengeRequired", "PleaseWaitFewMinutes", "ClientThrottledError", "RateLimitError"):
+                raise
             continue
 
         downloaded = 0

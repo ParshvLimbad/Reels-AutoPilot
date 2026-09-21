@@ -35,8 +35,9 @@ def setup_logging(level_name: Optional[str] = None) -> logging.Logger:
     formatter = logging.Formatter(_LOG_FORMAT, datefmt=_DATE_FORMAT)
 
     os.makedirs(os.path.dirname(config.LOG_FILE), exist_ok=True)
+    log_path = os.path.join(config.LOG_DIR, "web.log") if os.path.basename(sys.argv[0]) == "web.py" else (os.path.join(config.LOG_DIR, "watchdog.log") if os.path.basename(sys.argv[0]) == "watchdog.py" else config.LOG_FILE)
     file_handler = RotatingFileHandler(
-        config.LOG_FILE,
+        log_path,
         maxBytes=int(getattr(config, "LOG_MAX_BYTES", 5 * 1024 * 1024)),
         backupCount=int(getattr(config, "LOG_BACKUP_COUNT", 3)),
         encoding="utf-8",
@@ -51,7 +52,7 @@ def setup_logging(level_name: Optional[str] = None) -> logging.Logger:
     root.addHandler(console_handler)
 
     # Third-party libraries are far too chatty on a Raspberry Pi.
-    for noisy in ("moviepy", "urllib3", "werkzeug", "public_request", "private_request"):
+    for noisy in ("moviepy", "urllib3", "werkzeug", "public_request", "private_request", "instagrapi"):
         logging.getLogger(noisy).setLevel(logging.ERROR)
 
     _CONFIGURED = True

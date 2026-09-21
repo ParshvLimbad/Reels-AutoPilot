@@ -5,7 +5,7 @@ import os
 #--------------------------------------------------------------------------------------------------#
 
 # Base Directory (repository root)
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.environ.get("REELS_DATA_DIR") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # SQLite DB path
 DB_DIR = os.path.join(BASE_DIR, 'database')
@@ -47,8 +47,8 @@ POSTING_INTERVAL_IN_MIN = 10  # Every 10 Minutes
 SCRAPER_INTERVAL_IN_MIN = 720  # Every 12 hours
 
 # Instagram Username & Password
-USERNAME = "your_username"
-PASSWORD = "your_password"
+USERNAME = ""
+PASSWORD = ""
 
 # Account List for scraping
 ACCOUNTS = [

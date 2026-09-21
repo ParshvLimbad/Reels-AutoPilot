@@ -15,9 +15,8 @@ if hasattr(sys.stdout, "reconfigure"):
 from datetime import datetime
 from typing import Any, Dict
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, Response
 from sqlalchemy import desc
-from werkzeug.utils import secure_filename
 
 import accounts as AccountManager
 import config
@@ -27,12 +26,43 @@ import helpers
 import logger
 import reels as ReelsScraper
 import statefile
-from db import Config, Reel, Session
+from db import Config, Reel, Session, AuthCommand, Delivery
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 SERVICE_COMMAND_TIMEOUT_SECONDS = 60
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 log = logger.get_logger(__name__)
+
+
+@app.before_request
+def protect_dashboard():
+    import hmac
+    from werkzeug.security import check_password_hash
+    # Local health probe contains no secrets; all management requires login.
+    if request.path == "/api/health" and request.remote_addr in ("127.0.0.1", "::1"):
+        return None
+    path = os.path.join(config.BASE_DIR, ".dashboard-password")
+    try:
+        with open(path) as f:
+            password_hash = f.read().strip()
+    except OSError:
+        return Response("Dashboard password is not configured.", status=503)
+    credentials = request.authorization
+    if not credentials or credentials.username != "admin" or not check_password_hash(password_hash, credentials.password or ""):
+        return Response("Dashboard login required", 401, {"WWW-Authenticate": 'Basic realm="Reels dashboard"'})
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        from urllib.parse import urlsplit
+        origin = request.headers.get("Origin")
+        if origin and urlsplit(origin).netloc != request.host:
+            return Response("Cross-origin request rejected", status=403)
+
+
+@app.after_request
+def no_secret_caching(response):
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @app.route("/")
@@ -81,8 +111,9 @@ def get_config_api():
         if key not in result:
             result[key] = str(default_val) if default_val is not None else ""
 
-    if "PASSWORD" in result:
-        result["PASSWORD"] = "********"
+    for key in ("PASSWORD", "YOUTUBE_API_KEY", "DISCORD_WEBHOOK_URL"):
+        if key in result:
+            result[key] = "********" if result[key] else ""
     return jsonify(result)
 
 
@@ -94,8 +125,16 @@ def save_config_api():
         return jsonify({"status": "error", "message": "No data provided"}), 400
 
     for key, value in data.items():
-        if key == "PASSWORD" and value == "********":
+        if value == "********":
             continue
+        if key not in {"IS_REMOVE_FILES", "REMOVE_FILE_AFTER_MINS", "IS_ENABLED_REELS_SCRAPER", "IS_ENABLED_AUTO_POSTER", "FETCH_LIMIT", "POSTING_INTERVAL_IN_MIN", "SCRAPER_INTERVAL_IN_MIN", "ACCOUNTS", "CUSTOM_CAPTION", "HASTAGS", "HASHTAGS", "REEL_COVER_PATH", "IS_POST_TO_STORY", "LIKE_AND_VIEW_COUNTS_DISABLED", "DISABLE_COMMENTS", "IS_ENABLED_YOUTUBE_SCRAPING", "YOUTUBE_API_KEY", "CHANNEL_LINKS", "DISCORD_WEBHOOK_URL", "USERNAME", "PASSWORD"}:
+            return jsonify({"status": "error", "message": "Unsupported configuration key"}), 400
+        if key in {"REMOVE_FILE_AFTER_MINS", "FETCH_LIMIT", "POSTING_INTERVAL_IN_MIN", "SCRAPER_INTERVAL_IN_MIN"}:
+            try:
+                if int(value) < 1:
+                    raise ValueError()
+            except (ValueError, TypeError):
+                return jsonify({"status": "error", "message": "Intervals and limits must be positive integers"}), 400
         helpers.save_config(key, str(value))
 
     helpers.load_all_config()
@@ -112,9 +151,14 @@ def upload_cover_api():
         if file.filename == "":
             return jsonify({"status": "error", "message": "No selected file"}), 400
 
-        filename = secure_filename(file.filename)
-        save_path = os.path.join(config.BASE_DIR, filename)
-        file.save(save_path)
+        from PIL import Image
+        import uuid
+        directory = os.path.join(config.BASE_DIR, "covers")
+        os.makedirs(directory, exist_ok=True)
+        save_path = os.path.join(directory, uuid.uuid4().hex + ".jpg")
+        with Image.open(file.stream) as image:
+            image.thumbnail((1080, 1920))
+            image.convert("RGB").save(save_path, "JPEG", quality=90)
 
         helpers.save_config("REEL_COVER_PATH", save_path)
         helpers.load_all_config()
@@ -146,21 +190,8 @@ def _restart_service(service: str) -> subprocess.CompletedProcess:
 @app.route("/api/purge_rescrape", methods=["POST"])
 def purge_and_rescrape():
     """Purge unposted reels and restart the autopilot for a fresh scrape."""
-    try:
-        purger_path = os.path.join(config.BASE_DIR, "src", "purger.py")
-        subprocess.run(
-            [_python_executable(), purger_path],
-            capture_output=True,
-            text=True,
-            timeout=SERVICE_COMMAND_TIMEOUT_SECONDS,
-            check=False,
-        )
-        _restart_service(getattr(config, "AUTOPILOT_SERVICE", "reels-autopilot"))
-        return jsonify(
-            {"status": "ok", "message": "Purged unposted reels and triggered a fresh scrape!"}
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        return jsonify({"status": "error", "message": f"Failed to purge: {exc}"}), 500
+    helpers.save_config("PURGE_REQUESTED", "1")
+    return jsonify({"status": "ok", "message": "Purge queued; the worker will run it between uploads."})
 
 
 @app.route("/api/restart", methods=["POST"])
@@ -263,12 +294,11 @@ def list_accounts_api():
                 "is_enabled": record["is_enabled"],
                 "is_2fa": record["is_2fa"],
                 "has_password": bool(record["password"]),
-                "has_session_id": bool(record["session_id"]),
                 "has_totp_secret": bool(totp_secret),
-                "totp_secret": totp_secret,
+
                 "live_2fa_code": live_2fa_code,
                 "totp_remaining_seconds": remaining_seconds,
-                "login_status": runtime_state.get("login_status") or record["login_status"],
+                "login_status": record["login_status"],
                 "last_error": record["last_error"],
                 "last_post_at": record["last_post_at"],
                 "next_post_at": runtime_state.get("next_post_at"),
@@ -291,7 +321,6 @@ def add_account_api():
         AccountManager.add_account(
             username=username,
             password=str(data.get("password") or ""),
-            session_id=str(data.get("session_id") or ""),
             totp_secret=str(data.get("totp_secret") or "").strip(),
             is_enabled=1 if str(data.get("is_enabled", "1")) in ("1", "True", "true") else 0,
             is_2fa=1 if str(data.get("is_2fa", "0")) in ("1", "True", "true") else 0,
@@ -329,28 +358,35 @@ def delete_account_api(username: str):
 @app.route("/api/accounts/<username>/verify_2fa", methods=["POST"])
 def verify_2fa_api(username: str):
     """Submit a 6-digit 2FA verification code for an account."""
-    import auth
-    data: Dict[str, Any] = request.json or {}
+    data = request.json or {}
     code = str(data.get("code") or "").strip()
-    if not code:
-        return jsonify({"status": "error", "message": "2FA code is required"}), 400
+    if not (len(code) == 6 and code.isdigit()):
+        return jsonify({"status": "error", "message": "Enter a six-digit code"}), 400
+    return queue_auth(username, code)
 
-    account = AccountManager.get_account(username)
-    if not account:
+
+def queue_auth(username, code=""):
+    if not AccountManager.get_account(username):
         return jsonify({"status": "error", "message": "Account not found"}), 404
+    with Session() as s:
+        s.query(AuthCommand).filter_by(account=username).delete()
+        s.add(AuthCommand(account=username, code=code))
+        s.commit()
+    return jsonify({"status": "ok", "message": "Verification queued for the worker. Watch account status."})
 
-    password = account.password or getattr(config, "PASSWORD", "")
-    api, status, message = auth.login_with_2fa_code(username, password, code)
-    if status == "ok" and api is not None:
-        AccountManager.update_account(username, login_status="ok", is_2fa=1, last_error="")
-        state_accounts = statefile.load_state().get("accounts") or {}
-        if username in state_accounts:
-            state_accounts[username]["login_status"] = "ok"
-            state_accounts[username]["last_error"] = ""
-        return jsonify({"status": "ok", "message": f"@{username} 2FA verification successful!"})
-    else:
-        AccountManager.update_account(username, login_status="2fa", last_error=message)
-        return jsonify({"status": "error", "message": message}), 400
+
+@app.route("/api/accounts/<username>/resume", methods=["POST"])
+def resume_account(username):
+    return queue_auth(username)
+
+
+@app.route("/api/deliveries", methods=["GET"])
+def deliveries_api():
+    with Session() as s:
+        rows = s.query(Delivery).order_by(Delivery.id.desc()).limit(100).all()
+        return jsonify({"deliveries": [{"account": r.account, "source_code": r.code,
+            "status": r.status, "destination_code": r.media_code,
+            "error": r.error} for r in rows]})
 
 
 @app.route("/api/scrape_status", methods=["GET"])

@@ -120,20 +120,18 @@ def check_once() -> None:
         restart_service(autopilot, "service was not running")
         return
 
-    if str(config.IS_ENABLED_AUTO_POSTER) == "1":
-        interval_minutes = int(config.POSTING_INTERVAL_IN_MIN) * int(
-            getattr(config, "WATCHDOG_POST_STALL_MULTIPLIER", 5)
-        )
-        threshold = datetime.now() - timedelta(minutes=interval_minutes)
-        last_post = last_post_time()
-        if pending_reels() > 0 and (last_post is None or last_post < threshold):
-            last_text = last_post.strftime("%Y-%m-%d %H:%M:%S") if last_post else "never"
-            restart_service(
-                autopilot,
-                f"no post in the last {interval_minutes} minutes (last post: {last_text}) while reels are pending",
-            )
-            return
+    # No posts is a business state (empty, challenged, cooldown), not a crash.
+    # Only a stale worker heartbeat justifies restarting a running service.
+    heartbeat = os.path.join(config.STATE_DIR, "heartbeat")
+    if os.path.exists(heartbeat) and time.time() - os.path.getmtime(heartbeat) > 600:
+        restart_service(autopilot, "worker heartbeat missing for ten minutes")
+        return
 
+    progress = os.path.join(config.STATE_DIR, "progress")
+    # Long startup/download batches are allowed; a stuck operation is not.
+    if os.path.exists(progress) and time.time() - os.path.getmtime(progress) > 1800:
+        restart_service(autopilot, "scheduler made no progress for thirty minutes")
+        return
     if not dashboard_healthy():
         restart_service(web, "dashboard did not answer the health check")
 

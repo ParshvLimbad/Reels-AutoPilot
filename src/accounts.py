@@ -14,7 +14,7 @@ import auth
 import config
 import helpers as Helper
 import notifier
-from db import PostingAccount, Session
+from db import PostingAccount, Session, AuthCommand
 from logger import get_logger
 
 log = get_logger(__name__)
@@ -43,13 +43,39 @@ class AccountRuntime:
         self.last_post_at: Optional[datetime] = None
         self.is_recycling: bool = False
         self.is_uploading: bool = False
+        self.interval_minutes = int(config.POSTING_INTERVAL_IN_MIN)
 
     # ------------------------------------------------------------------ #
     def ensure_login(self, force: bool = False) -> Optional[Client]:
         """Return a logged-in client, logging in when needed."""
+        record = get_account(self.username)
+        code = ""
+        requested = False
+        with Session() as session:
+            commands = session.query(AuthCommand).filter_by(account=self.username).all()
+            for command in commands:
+                if (datetime.now() - command.created_at).total_seconds() < 90:
+                    requested = True
+                    code = command.code or ""
+                session.delete(command)
+            session.commit()
+        if requested:
+            self.client = None
+            self.next_login_attempt_at = datetime.now()
+            update_account(self.username, login_status="unknown", next_login_at=None,
+                           challenged_until=None)
+        elif record:
+            if record.login_status in ("challenged", "2fa", "failed"):
+                self.login_status = record.login_status
+                self.last_error = record.last_error or ""
+                return None
+            if record.next_login_at and datetime.now() < record.next_login_at:
+                self.login_status = record.login_status
+                self.next_login_attempt_at = record.next_login_at
+                return None
         if self.client is not None and not force:
             return self.client
-        if datetime.now() < self.next_login_attempt_at and not force:
+        if datetime.now() < self.next_login_attempt_at:
             return None
 
         # Fetch latest totp_secret from DB if available
@@ -63,6 +89,7 @@ class AccountRuntime:
             session_file=self.session_file,
             is_2fa=self.is_2fa,
             totp_secret=totp_sec,
+            verification_code=code,
         )
         self.login_status = status
         self.last_error = message
@@ -71,7 +98,7 @@ class AccountRuntime:
         if status == "ok":
             self.next_login_attempt_at = datetime.now()
             notifier.reset_dedupe(f"login_failed:{self.username}")
-            update_account(self.username, login_status="ok", last_error="")
+            update_account(self.username, login_status="ok", last_error="", next_login_at=None, challenged_until=None, challenge_count=0)
             return client
 
         if status == "transient":
@@ -85,6 +112,7 @@ class AccountRuntime:
                 f"@{self.username}: login deferred after a transient error ({message}). "
                 f"Retrying in {wait}s; session file left intact."
             )
+            update_account(self.username, login_status="transient", last_error=message, next_login_at=self.next_login_attempt_at)
             return None
 
         if status == "2fa":
@@ -92,6 +120,7 @@ class AccountRuntime:
             update_account(self.username, is_2fa=1, login_status="2fa", last_error=message)
         elif status == "challenged":
             self.register_challenge(message)
+            return None
         else:
             update_account(self.username, login_status="failed", last_error=message)
 
@@ -115,6 +144,7 @@ class AccountRuntime:
             last_error=message,
             challenge_count=count,
             challenged_until=until,
+            next_login_at=until,
         )
         log.warning(
             f"@{self.username}: session challenged (#{count}). Next attempt after {until:%Y-%m-%d %H:%M:%S}."
@@ -129,7 +159,7 @@ class AccountRuntime:
         case.
         """
         self.client = None
-        return self.ensure_login(force=True)
+        return self.ensure_login()
 
     def health_check(self) -> bool:
         """Keep the session warm; re-login immediately when it is dead."""
@@ -140,14 +170,28 @@ class AccountRuntime:
         self.last_health_check_at = now
         if self.client is None:
             return self.ensure_login() is not None
-        # is_session_alive() returns True for transient errors, so a 429 or a
-        # dropped connection never triggers a needless re-login.
-        if auth.is_session_alive(self.client):
+        try:
+            self.client.account_info()
             auth.dump_session(self.client, self.session_file)
-            log.debug(f"@{self.username}: session healthy.")
             return True
-        log.warning(f"@{self.username}: session is no longer authenticated. Re-authenticating.")
-        return self.relogin() is not None
+        except Exception as exc:
+            self.handle_error(exc)
+            return False
+
+    def handle_error(self, exc) -> None:
+        """Persist a pause instead of reauthenticating inside error handlers."""
+        from instagrapi.exceptions import ChallengeRequired, LoginRequired
+        self.client = None
+        self.last_error = type(exc).__name__
+        if isinstance(exc, ChallengeRequired):
+            self.register_challenge(self.last_error)
+            notifier.alert_login_failed(self.username)
+            return
+        self.login_status = "expired" if isinstance(exc, LoginRequired) else "transient"
+        self.next_login_attempt_at = datetime.now() + timedelta(seconds=900)
+        update_account(self.username, login_status=self.login_status,
+                       last_error=self.last_error, next_login_at=self.next_login_attempt_at)
+
 
     def to_dict(self) -> Dict[str, object]:
         """Serialise runtime state for the dashboard."""
@@ -155,6 +199,7 @@ class AccountRuntime:
             "username": self.username,
             "login_status": self.login_status,
             "last_error": self.last_error,
+            "next_login_at": self.next_login_attempt_at.isoformat(),
             "is_2fa": self.is_2fa,
             "next_post_at": self.next_post_at.isoformat() if self.next_post_at else None,
             "last_post_at": self.last_post_at.isoformat() if self.last_post_at else None,
@@ -218,8 +263,9 @@ def add_account(username: str, password: str = "", session_id: str = "",
                 totp_secret: str = "", is_enabled: int = 1, is_2fa: int = 0) -> Dict[str, object]:
     """Create or update a posting account."""
     username = (username or "").strip().lstrip("@")
-    if not username:
-        raise ValueError("username is required")
+    import re
+    if not re.fullmatch(r"[A-Za-z0-9_.]{1,30}", username):
+        raise ValueError("Invalid Instagram username")
 
     session = Session()
     try:
@@ -352,8 +398,19 @@ class AccountPool:
                     session_file=str(record["session_file"]),
                     is_2fa=bool(record["is_2fa"]),
                 )
+                row = get_account(username)
+                if row:
+                    runtime.next_post_at = row.next_post_at or datetime.now()
+                    runtime.last_post_at = row.last_post_at
+                    runtime.next_login_attempt_at = row.next_login_at or datetime.now()
+                    runtime.login_status = row.login_status or "unknown"
                 self.runtimes[username] = runtime
             else:
+                interval = max(1, int(config.POSTING_INTERVAL_IN_MIN))
+                if interval != runtime.interval_minutes:
+                    runtime.interval_minutes = interval
+                    runtime.next_post_at = (runtime.last_post_at or datetime.now()) + timedelta(minutes=interval)
+                    update_account(username, next_post_at=runtime.next_post_at)
                 runtime.password = str(record["password"])
                 runtime.session_id = str(record["session_id"])
                 runtime.is_2fa = bool(record["is_2fa"])
