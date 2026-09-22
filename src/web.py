@@ -2,6 +2,7 @@
 """Flask dashboard and JSON API for Reels-AutoPilot."""
 from __future__ import annotations
 
+from pathlib import Path
 import os
 import subprocess
 import sys
@@ -81,7 +82,9 @@ def official_api(username):
     if not AccountManager.get_account(username):
         return jsonify(error='Account not found'), 404
     if request.method == 'GET':
-        return jsonify(official.status(username))
+        result = official.status(username)
+        result['discovery'] = official.read(Path(config.BASE_DIR) / '.official' / 'apify-state.json')
+        return jsonify(result)
     data = request.get_json() or {}
     try:
         if data.get('token'):

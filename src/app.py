@@ -170,6 +170,16 @@ def posting_interval_seconds() -> int:
 
 def run_scrape(older=False) -> int:
     """Scrape all source accounts and distribute the new reels."""
+    import apify_source
+    if apify_source.configured():
+        import public_reels
+        discovered = apify_source.tick()
+        count = public_reels.repair_pending(limit=3)
+        usernames = [runtime.username for runtime in pool.active()]
+        if usernames:
+            distributor.distribute_unassigned(usernames)
+        log.info('[Scraper] Apify discovered %s new reels; downloaded %s.', discovered, count)
+        return count
     client = scraping_client()
     if client is None:
         import public_reels

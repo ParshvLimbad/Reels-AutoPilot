@@ -36,6 +36,22 @@ class ReliabilityTests(unittest.TestCase):
             s.commit()
         return str(path)
 
+    def test_apify_discovery_deduplicates_source_codes(self):
+        import apify_source
+        items = [{'url':'https://www.instagram.com/reel/Apify123/', 'ownerUsername':'source_a', 'id':'123'}]
+        self.assertEqual(apify_source.ingest(items + items), 1)
+        self.assertEqual(apify_source.ingest(items), 0)
+
+    def test_apify_ambiguous_start_is_not_resubmitted(self):
+        import apify_source, official
+        with tempfile.TemporaryDirectory() as tmp, patch.object(apify_source, 'ROOT', return_value=Path(tmp)):
+            official.save(Path(tmp)/'apify-keys.json', {'keys':['test']})
+            with patch.object(apify_source, 'call', side_effect=ValueError('timeout')) as call:
+                apify_source.tick()
+                apify_source.tick()
+                self.assertEqual(call.call_count, 1)
+                self.assertTrue(official.read(Path(tmp)/'apify-state.json')['uncertain'])
+
     def test_public_url_queue_is_durable_and_deduplicated(self):
         import public_reels
         with patch.object(public_reels, 'download') as download:
