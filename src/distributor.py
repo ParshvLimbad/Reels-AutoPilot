@@ -19,6 +19,7 @@ import config
 import helpers as Helper
 import notifier
 from db import Reel, Session
+import delivery
 from logger import get_logger
 
 log = get_logger(__name__)
@@ -81,7 +82,7 @@ def pending_count(username: str) -> int:
             .filter(Reel.assigned_to == username)
             .all()
         )
-        return sum(1 for reel in reels if reel.file_path and os.path.exists(reel.file_path))
+        return sum(1 for reel in reels if reel.file_path and os.path.exists(reel.file_path) and not delivery.blocked(username, reel.code))
     finally:
         session.close()
 
@@ -101,7 +102,7 @@ def counts_by_account(usernames: List[str]) -> Dict[str, Dict[str, int]]:
             stats[username] = {
                 "assigned": assigned,
                 "posted": posted,
-                "pending": assigned - posted,
+                "pending": pending_count(username),
             }
     finally:
         session.close()
@@ -184,8 +185,6 @@ def swap_assignments(usernames: List[str]) -> int:
             .all()
         )
         for reel in posted_reels:
-            if not reel.file_path or not os.path.exists(reel.file_path):
-                continue
             history = posted_by_list(reel.posted_by)
             owner = reel.assigned_to or (history[-1] if history else usernames[0])
             candidate = next_owner(owner, usernames, history)
@@ -211,68 +210,13 @@ def swap_assignments(usernames: List[str]) -> int:
     return swapped
 
 
-def reset_all(usernames: List[str]) -> int:
-    """Last resort: clear posting history for every reel and redistribute."""
-    session = Session()
-    reset = 0
-    try:
-        reels = session.query(Reel).order_by(Reel.id).all()
-        for reel in reels:
-            if not reel.file_path or not os.path.exists(reel.file_path):
-                continue
-            reel.is_posted = False
-            reel.posted_by = None
-            reel.assigned_to = None
-            reset += 1
-        session.commit()
-    except Exception as exc:  # pragma: no cover
-        session.rollback()
-        log.error(f"Full reset failed: {exc}")
-        return 0
-    finally:
-        session.close()
-
-    if reset:
-        log.warning(f"[Poster] Every reel was posted by every account. Reset {reset} reels and redistributed.")
-        distribute_unassigned(usernames)
-    return reset
+def reset_all(usernames):
+    """History is permanent; older unseen source reels are fetched instead."""
+    return 0
 
 
-def recycle_oldest(account_filter: Optional[str] = None, batch_size: Optional[int] = None) -> int:
-    """Single-account fallback: repost the oldest posted reels.
-
-    Reels posted within the last `LAST_POSTED_MEMORY` posts are skipped so the
-    same reel is never posted twice in a row. Returns how many were recycled.
-    """
-    limit = int(batch_size or getattr(config, "RECYCLE_BATCH_SIZE", 10) or getattr(config, "FETCH_LIMIT", 10))
-    recent = set(get_last_posted_codes())
-
-    session = Session()
-    recycled = 0
-    try:
-        query = session.query(Reel).filter(Reel.is_posted == True)  # noqa: E712
-        if account_filter:
-            query = query.filter(Reel.account == account_filter)
-        candidates = query.order_by(Reel.posted_at.asc(), Reel.id.asc()).all()
-
-        for reel in candidates:
-            if recycled >= limit:
-                break
-            if reel.code in recent:
-                continue
-            if not reel.file_path or not os.path.exists(reel.file_path):
-                continue
-            reel.is_posted = False
-            reel.swap_phase = int(reel.swap_phase or 0) + 1
-            recycled += 1
-        session.commit()
-    except Exception as exc:  # pragma: no cover
-        session.rollback()
-        log.error(f"Recycling failed: {exc}")
-        return 0
-    finally:
-        session.close()
-    return recycled
+def recycle_oldest(account_filter=None, batch_size=None):
+    return 0
 
 
 def source_account_with_most_posted() -> Optional[str]:

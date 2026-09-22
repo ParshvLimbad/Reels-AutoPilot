@@ -1,11 +1,12 @@
 import os
+import os
 import paramiko
 from scp import SCPClient
 
 host = '192.168.29.60'
 port = 22
 username = 'electro'
-password = 'electro'
+password = os.environ["PI_PASSWORD"]
 local_image = r'C:\Users\Parshv\Downloads\cover.jpg'
 remote_image = '/home/electro/reels-autopilot/cover_image.jpg'
 

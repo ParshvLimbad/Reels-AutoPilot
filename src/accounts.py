@@ -14,7 +14,7 @@ import auth
 import config
 import helpers as Helper
 import notifier
-from db import PostingAccount, Session
+from db import PostingAccount, Session, AuthCommand
 from logger import get_logger
 
 log = get_logger(__name__)
@@ -43,13 +43,50 @@ class AccountRuntime:
         self.last_post_at: Optional[datetime] = None
         self.is_recycling: bool = False
         self.is_uploading: bool = False
+        self.interval_minutes = int(config.POSTING_INTERVAL_IN_MIN)
 
     # ------------------------------------------------------------------ #
     def ensure_login(self, force: bool = False) -> Optional[Client]:
         """Return a logged-in client, logging in when needed."""
+        import official
+        if official.connected(self.username):
+            self.client = None
+            self.login_status = "official"
+            return None
+        record = get_account(self.username)
+        code = ""
+        requested = False
+        with Session() as session:
+            commands = session.query(AuthCommand).filter_by(account=self.username).all()
+            for command in commands:
+                if (datetime.now() - command.created_at).total_seconds() < 90:
+                    requested = True
+                    code = command.code or ""
+                session.delete(command)
+            session.commit()
+        # Manual requests cannot bypass a persisted API cooldown.
+        if (record and record.login_status == "transient" and
+                record.next_login_at and datetime.now() < record.next_login_at):
+            self.login_status = record.login_status
+            self.next_login_attempt_at = record.next_login_at
+            return None
+        if requested:
+            self.client = None
+            self.next_login_attempt_at = datetime.now()
+            update_account(self.username, login_status="unknown", next_login_at=None,
+                           challenged_until=None)
+        elif record:
+            if record.login_status in ("challenged", "2fa", "failed"):
+                self.login_status = record.login_status
+                self.last_error = record.last_error or ""
+                return None
+            if record.next_login_at and datetime.now() < record.next_login_at:
+                self.login_status = record.login_status
+                self.next_login_attempt_at = record.next_login_at
+                return None
         if self.client is not None and not force:
             return self.client
-        if datetime.now() < self.next_login_attempt_at and not force:
+        if datetime.now() < self.next_login_attempt_at:
             return None
 
         # Fetch latest totp_secret from DB if available
@@ -63,6 +100,7 @@ class AccountRuntime:
             session_file=self.session_file,
             is_2fa=self.is_2fa,
             totp_secret=totp_sec,
+            verification_code=code,
         )
         self.login_status = status
         self.last_error = message
@@ -71,20 +109,19 @@ class AccountRuntime:
         if status == "ok":
             self.next_login_attempt_at = datetime.now()
             notifier.reset_dedupe(f"login_failed:{self.username}")
-            update_account(self.username, login_status="ok", last_error="")
+            update_account(
+                self.username,
+                login_status="ok",
+                last_error="",
+                next_login_at=None,
+                challenged_until=None,
+                challenge_count=0,
+                transient_count=0,
+            )
             return client
 
         if status == "transient":
-            # Rate limit / network blip: credentials and session file are fine.
-            # Back off quietly, do not mark the account failed and do not send
-            # a login-failure alert.
-            wait = int(getattr(config, "RATE_LIMIT_BACKOFF_SECONDS", 900))
-            self.login_status = "transient"
-            self.next_login_attempt_at = datetime.now() + timedelta(seconds=wait)
-            log.warning(
-                f"@{self.username}: login deferred after a transient error ({message}). "
-                f"Retrying in {wait}s; session file left intact."
-            )
+            self.register_transient(message)
             return None
 
         if status == "2fa":
@@ -92,6 +129,7 @@ class AccountRuntime:
             update_account(self.username, is_2fa=1, login_status="2fa", last_error=message)
         elif status == "challenged":
             self.register_challenge(message)
+            return None
         else:
             update_account(self.username, login_status="failed", last_error=message)
 
@@ -100,6 +138,27 @@ class AccountRuntime:
             seconds=int(getattr(config, "LOGIN_FAILURE_RETRY_SECONDS", 300))
         )
         return None
+
+    def register_transient(self, message: str = "") -> None:
+        """Persist exponential cooldown for an inconclusive API/login error."""
+        record = get_account(self.username)
+        count = int((record.transient_count if record else 0) or 0) + 1
+        delay = auth.transient_backoff(count)
+        until = datetime.now() + delay
+        self.login_status = "transient"
+        self.last_error = message
+        self.next_login_attempt_at = until
+        update_account(
+            self.username,
+            login_status="transient",
+            last_error=message,
+            transient_count=count,
+            next_login_at=until,
+        )
+        log.warning(
+            f"@{self.username}: transient session/API error ({message}); "
+            f"retrying after {until:%Y-%m-%d %H:%M:%S} with the session preserved."
+        )
 
     def register_challenge(self, message: str = "") -> None:
         """Mark the session as challenged and back it off exponentially."""
@@ -115,6 +174,7 @@ class AccountRuntime:
             last_error=message,
             challenge_count=count,
             challenged_until=until,
+            next_login_at=until,
         )
         log.warning(
             f"@{self.username}: session challenged (#{count}). Next attempt after {until:%Y-%m-%d %H:%M:%S}."
@@ -129,7 +189,7 @@ class AccountRuntime:
         case.
         """
         self.client = None
-        return self.ensure_login(force=True)
+        return self.ensure_login()
 
     def health_check(self) -> bool:
         """Keep the session warm; re-login immediately when it is dead."""
@@ -140,14 +200,31 @@ class AccountRuntime:
         self.last_health_check_at = now
         if self.client is None:
             return self.ensure_login() is not None
-        # is_session_alive() returns True for transient errors, so a 429 or a
-        # dropped connection never triggers a needless re-login.
-        if auth.is_session_alive(self.client):
+        try:
+            self.client.account_info()
             auth.dump_session(self.client, self.session_file)
-            log.debug(f"@{self.username}: session healthy.")
             return True
-        log.warning(f"@{self.username}: session is no longer authenticated. Re-authenticating.")
-        return self.relogin() is not None
+        except Exception as exc:
+            self.handle_error(exc)
+            return False
+
+    def handle_error(self, exc) -> None:
+        """Persist a pause instead of reauthenticating inside error handlers."""
+        from instagrapi.exceptions import ChallengeRequired, LoginRequired
+        self.client = None
+        self.last_error = type(exc).__name__
+        if isinstance(exc, ChallengeRequired):
+            self.register_challenge(self.last_error)
+            notifier.alert_login_failed(self.username)
+            return
+        if isinstance(exc, LoginRequired):
+            self.login_status = "expired"
+            self.next_login_attempt_at = datetime.now() + timedelta(seconds=900)
+            update_account(self.username, login_status=self.login_status,
+                           last_error=self.last_error, next_login_at=self.next_login_attempt_at)
+            return
+        self.register_transient(self.last_error)
+
 
     def to_dict(self) -> Dict[str, object]:
         """Serialise runtime state for the dashboard."""
@@ -155,6 +232,7 @@ class AccountRuntime:
             "username": self.username,
             "login_status": self.login_status,
             "last_error": self.last_error,
+            "next_login_at": self.next_login_attempt_at.isoformat(),
             "is_2fa": self.is_2fa,
             "next_post_at": self.next_post_at.isoformat() if self.next_post_at else None,
             "last_post_at": self.last_post_at.isoformat() if self.last_post_at else None,
@@ -186,6 +264,7 @@ def list_accounts(enabled_only: bool = False) -> List[Dict[str, object]]:
                 "totp_secret": row.totp_secret or "",
                 "has_totp_secret": bool(row.totp_secret),
                 "login_status": row.login_status or "unknown",
+                "next_login_at": row.next_login_at.isoformat() if row.next_login_at else None,
                 "last_error": row.last_error or "",
                 "last_post_at": row.last_post_at.isoformat() if row.last_post_at else None,
                 "challenged_until": row.challenged_until.isoformat() if row.challenged_until else None,
@@ -218,8 +297,9 @@ def add_account(username: str, password: str = "", session_id: str = "",
                 totp_secret: str = "", is_enabled: int = 1, is_2fa: int = 0) -> Dict[str, object]:
     """Create or update a posting account."""
     username = (username or "").strip().lstrip("@")
-    if not username:
-        raise ValueError("username is required")
+    import re
+    if not re.fullmatch(r"[A-Za-z0-9_.]{1,30}", username):
+        raise ValueError("Invalid Instagram username")
 
     session = Session()
     try:
@@ -352,8 +432,19 @@ class AccountPool:
                     session_file=str(record["session_file"]),
                     is_2fa=bool(record["is_2fa"]),
                 )
+                row = get_account(username)
+                if row:
+                    runtime.next_post_at = row.next_post_at or datetime.now()
+                    runtime.last_post_at = row.last_post_at
+                    runtime.next_login_attempt_at = row.next_login_at or datetime.now()
+                    runtime.login_status = row.login_status or "unknown"
                 self.runtimes[username] = runtime
             else:
+                interval = max(1, int(config.POSTING_INTERVAL_IN_MIN))
+                if interval != runtime.interval_minutes:
+                    runtime.interval_minutes = interval
+                    runtime.next_post_at = (runtime.last_post_at or datetime.now()) + timedelta(minutes=interval)
+                    update_account(username, next_post_at=runtime.next_post_at)
                 runtime.password = str(record["password"])
                 runtime.session_id = str(record["session_id"])
                 runtime.is_2fa = bool(record["is_2fa"])

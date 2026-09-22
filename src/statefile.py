@@ -129,43 +129,47 @@ def all_pending_uploads() -> List[Dict[str, Any]]:
 # upload lock                                                                  #
 # --------------------------------------------------------------------------- #
 @contextmanager
-def upload_lock(owner: str = "", wait_seconds: int = LOCK_WAIT_SECONDS) -> Iterator[bool]:
-    """Cross-process lock guarding the upload critical section.
-
-    Yields True when the lock was acquired, False when it timed out. SQLite has
-    no row locking, so this file lock provides the `SELECT FOR UPDATE`
-    semantics the poster needs.
-    """
+def upload_lock(owner: str = "", wait_seconds: int = LOCK_WAIT_SECONDS):
     path = config.UPLOAD_LOCK_FILE
-    deadline = time.time() + wait_seconds
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    handle = open(path, "a+b")
+    if os.path.getsize(path) == 0:
+        handle.write(b"0")
+        handle.flush()
+    deadline = time.monotonic() + wait_seconds
     acquired = False
-    fd = None
-    while time.time() < deadline:
-        try:
-            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(fd, f"{owner}|{datetime.now().isoformat()}".encode("utf-8"))
-            acquired = True
-            break
-        except FileExistsError:
-            try:
-                age = time.time() - os.path.getmtime(path)
-                if age > LOCK_STALE_SECONDS:
-                    log.warning(f"Removing stale upload lock ({age:.0f}s old).")
-                    os.remove(path)
-                    continue
-            except OSError:
-                pass
-            time.sleep(LOCK_POLL_SECONDS)
     try:
+        while time.monotonic() <= deadline:
+            try:
+                handle.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+                break
+            except OSError:
+                time.sleep(0.1)
         yield acquired
     finally:
-        if fd is not None:
-            try:
-                os.close(fd)
-            except OSError:
-                pass
         if acquired:
-            try:
-                os.remove(path)
-            except OSError:
-                pass
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(handle, fcntl.LOCK_UN)
+        handle.close()
+
+
+def write_heartbeat():
+    with open(os.path.join(config.STATE_DIR, "heartbeat"), "w") as f:
+        f.write(str(time.time()))
+
+
+def write_progress():
+    with open(os.path.join(config.STATE_DIR, "progress"), "w") as f:
+        f.write(str(time.time()))

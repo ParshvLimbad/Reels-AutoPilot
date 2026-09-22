@@ -58,7 +58,11 @@ def purge_posted_files() -> int:
     removed = 0
     try:
         posted = session.query(Reel).filter_by(is_posted=True).all()
+        from db import Delivery
+        held = {r.code for r in session.query(Delivery).filter(Delivery.status.in_(["uploading", "uncertain"])).all()}
         for reel in posted:
+            if reel.code in held:
+                continue
             path = reel.file_path
             if path and os.path.exists(path):
                 try:
@@ -73,7 +77,7 @@ def purge_posted_files() -> int:
                 except OSError:
                     pass
             # Also delete the DB row so the reel can be re-scraped later
-            session.delete(reel)
+            # Keep delivery history and source metadata permanently.
         session.commit()
     finally:
         session.close()

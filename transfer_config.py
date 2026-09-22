@@ -1,11 +1,12 @@
 import os
+import os
 import paramiko
 from scp import SCPClient
 
 host = '192.168.29.60'
 port = 22
 username = 'electro'
-password = 'electro'
+password = os.environ["PI_PASSWORD"]
 
 def create_ssh_client(server, port, user, password):
     client = paramiko.SSHClient()

@@ -19,6 +19,7 @@ from sqlalchemy import (
     Text,
     create_engine,
     text,
+    UniqueConstraint,
 )
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import declarative_base, sessionmaker
@@ -89,9 +90,38 @@ class PostingAccount(Base):
     last_error = Column(Text)
     challenged_until = Column(DateTime)          # exponential backoff for challenges
     challenge_count = Column(Integer, default=0)
+    transient_count = Column(Integer, default=0)
     last_post_at = Column(DateTime)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now)
+
+    next_login_at = Column(DateTime)
+    next_post_at = Column(DateTime)
+    last_source = Column(String)
+
+
+class Delivery(Base):
+    """Durable per-destination ledger, independent of downloaded files."""
+    __tablename__ = "deliveries"
+    __table_args__ = (UniqueConstraint("account", "code"),)
+    id = Column(Integer, primary_key=True)
+    account = Column(String, nullable=False)
+    code = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="uploading")
+    media_pk = Column(String)
+    media_code = Column(String)
+    started_at = Column(DateTime, default=datetime.now)
+    confirmed_at = Column(DateTime)
+    error = Column(Text)
+
+
+class AuthCommand(Base):
+    """Short-lived requests consumed only by the worker."""
+    __tablename__ = "auth_commands"
+    id = Column(Integer, primary_key=True)
+    account = Column(String, nullable=False)
+    code = Column(String, default="")
+    created_at = Column(DateTime, default=datetime.now)
 
 
 class ScrapeStatus(Base):
@@ -129,10 +159,14 @@ def migrate() -> None:
             "swap_phase": "INTEGER DEFAULT 0",
         },
         "posting_accounts": {
+            "next_login_at": "DATETIME",
+            "next_post_at": "DATETIME",
+            "last_source": "TEXT",
             "login_status": "TEXT DEFAULT 'unknown'",
             "last_error": "TEXT",
             "challenged_until": "DATETIME",
             "challenge_count": "INTEGER DEFAULT 0",
+            "transient_count": "INTEGER DEFAULT 0",
             "totp_secret": "TEXT",
         },
     }
@@ -174,6 +208,8 @@ class ReelEncoder(json.JSONEncoder):
     """JSON encoder able to serialise instagrapi media objects."""
 
     def default(self, obj):
+        if type(obj).__name__ in ("Url", "AnyUrl", "HttpUrl", "AnyHttpUrl"):
+            return str(obj)
         if hasattr(obj, "dict"):
             return obj.dict()
         elif hasattr(obj, "model_dump"):

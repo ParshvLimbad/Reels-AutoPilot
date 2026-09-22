@@ -28,6 +28,7 @@ import auth
 import config
 import diskspace
 import distributor
+import delivery
 import helpers as Helper
 import netcheck
 import notifier
@@ -167,14 +168,35 @@ def posting_interval_seconds() -> int:
     return (int(config.POSTING_INTERVAL_IN_MIN) * 60) + random.randint(5, 20)
 
 
-def run_scrape() -> int:
+def run_scrape(older=False) -> int:
     """Scrape all source accounts and distribute the new reels."""
+    import apify_source
+    if apify_source.configured():
+        import public_reels
+        discovered = apify_source.tick()
+        count = public_reels.repair_pending(limit=3)
+        usernames = [runtime.username for runtime in pool.active()]
+        if usernames:
+            distributor.distribute_unassigned(usernames)
+        log.info('[Scraper] Apify discovered %s new reels; downloaded %s.', discovered, count)
+        return count
     client = scraping_client()
     if client is None:
-        log.warning("[Scraper] No logged-in account available for scraping.")
-        return 0
+        import public_reels
+        count = public_reels.repair_pending(limit=3)
+        usernames = [runtime.username for runtime in pool.active()]
+        if usernames:
+            distributor.distribute_unassigned(usernames)
+        log.info("[Scraper] Recovered %s known reels via public downloader; profile discovery still needs a source client.", count)
+        return count
     set_status("scraping")
-    new_reels = reels.main(client)
+    try:
+        new_reels = reels.main(client, older=older)
+    except Exception as exc:
+        runtime = pool.any_logged_in()
+        if runtime:
+            runtime.handle_error(exc)
+        raise
     usernames = [runtime.username for runtime in pool.active()]
     if usernames:
         distributor.distribute_unassigned(usernames)
@@ -198,43 +220,17 @@ def handle_exhaustion(runtimes: List[AccountManager.AccountRuntime]) -> None:
     Order: fresh scrape -> swap between accounts -> recycle -> full reset.
     """
     usernames = [runtime.username for runtime in runtimes]
-    log.info("[Poster] All accounts exhausted. Trying a fresh scrape first...")
-    set_status("scraping")
-    new_reels = run_scrape()
-    if new_reels:
-        log.info(f"[Poster] Fresh scrape brought {new_reels} new reels. No recycling needed.")
-        for runtime in runtimes:
-            runtime.is_recycling = False
+    # Complete the agreed swap before adding another batch of fresh content.
+    if len(usernames) >= 2 and distributor.swap_assignments(usernames):
+        client = scraping_client()
+        if client:
+            reels.repair_missing_files(client)
         return
-
-    if len(usernames) >= 2:
-        swapped = distributor.swap_assignments(usernames)
-        if swapped:
-            for runtime in runtimes:
-                runtime.is_recycling = True
-            return
-
-    recycled = distributor.recycle_round_robin()
-    if recycled:
-        distributor.distribute_unassigned(usernames)
-        for runtime in runtimes:
-            runtime.is_recycling = True
-        log.info(f"[Poster] Recycled {recycled} older reels back into the queue.")
+    global next_reels_scraper_run_at
+    if next_reels_scraper_run_at > datetime.now():
         return
-
-    reset = distributor.reset_all(usernames)
-    if reset:
-        for runtime in runtimes:
-            runtime.is_recycling = True
-    else:
-        log.error("[Poster] No content available at all. Add source accounts or check downloads folder.")
-        notifier.send(
-            "\u26a0\ufe0f No content available",
-            "There are no reels on disk to post. Check the source accounts and the downloads folder.",
-            color=notifier.COLOR_WARNING,
-            dedupe_key="no_content",
-            throttle_minutes=180,
-        )
+    next_reels_scraper_run_at = datetime.now() + timedelta(minutes=max(1, int(config.SCRAPER_INTERVAL_IN_MIN)))
+    run_scrape(older=True)
 
 
 def post_multi_account(runtimes: List[AccountManager.AccountRuntime]) -> None:
@@ -254,6 +250,13 @@ def post_multi_account(runtimes: List[AccountManager.AccountRuntime]) -> None:
 
     for runtime in ready:
         try:
+            import official
+            if official.connected(runtime.username):
+                success = official.tick(runtime.username)
+                runtime.next_post_at = datetime.now() + timedelta(seconds=posting_interval_seconds() if success else 60)
+                if success:
+                    AccountManager.mark_posted(runtime.username)
+                continue
             client = runtime.ensure_login()
             if client is None:
                 log.warning(f"[Poster] @{runtime.username}: not logged in ({runtime.login_status}). Skipping.")
@@ -286,10 +289,10 @@ def post_multi_account(runtimes: List[AccountManager.AccountRuntime]) -> None:
             runtime.is_uploading = False
             log.error(f"[Poster] @{runtime.username} error: {type(exc).__name__}: {exc}")
             message = str(exc).lower()
-            if "login_required" in message or "LoginRequired" in type(exc).__name__ or "challenge" in message:
-                runtime.relogin()
+            runtime.handle_error(exc)
             runtime.next_post_at = datetime.now() + timedelta(seconds=120)
         finally:
+            AccountManager.update_account(runtime.username, next_post_at=runtime.next_post_at)
             set_status("idle")
 
 
@@ -329,6 +332,7 @@ def startup_self_check() -> None:
     set_status("self-check")
     log.info("[Startup] Running self-check...")
 
+    delivery.migrate_history()
     AccountManager.bootstrap_from_legacy_config()
     runtimes = pool.refresh()
 
@@ -341,7 +345,7 @@ def startup_self_check() -> None:
             poster.recover_pending_upload(client, account)
         except Exception as exc:
             log.warning(f"[Startup] Could not reconcile pending upload for @{account}: {exc}")
-            statefile.clear_pending_upload(account)
+            # Preserve uncertain markers until resolved.
 
     # Drop rows whose video file disappeared, and fix NULL flags
     session = Session()
@@ -382,16 +386,40 @@ def main() -> None:
     global next_purge_run_at, next_disk_log_at, next_state_save_at
 
     log.info("Reels-AutoPilot starting up.")
+    import threading
+    def heartbeat():
+        while not _shutdown_requested:
+            statefile.write_heartbeat()
+            time.sleep(15)
+    threading.Thread(target=heartbeat, daemon=True).start()
     restore_state()
     startup_self_check()
 
     was_offline = False
 
     while not _shutdown_requested:
+        statefile.write_progress()
         try:
             Helper.load_all_config()
+            if Helper.get_config("PURGE_REQUESTED") == "1":
+                purger.purge_unposted()
+                Helper.save_config("PURGE_REQUESTED", "0")
+                next_reels_scraper_run_at = datetime.now()
             runtimes = pool.refresh()
+            # Consume interactive login requests promptly, without waiting for
+            # the posting timer or health-check interval.
+            from db import AuthCommand
+            with Session() as command_session:
+                requested_accounts = {r.account for r in command_session.query(AuthCommand).all()}
+            for runtime in runtimes:
+                if runtime.username in requested_accounts:
+                    runtime.ensure_login()
             multi_account = bool(runtimes)
+            if not runtimes and AccountManager.list_accounts():
+                set_status("all-accounts-disabled")
+                persist_state()
+                time.sleep(5)
+                continue
 
             online, transitioned = netcheck.check()
             if not online:
@@ -402,11 +430,8 @@ def main() -> None:
                 time.sleep(int(getattr(config, "NETWORK_RETRY_SECONDS", 60)))
                 continue
             if was_offline and transitioned:
-                log.warning("[Network] Back online. Forcing a fresh login for every account.")
+                log.info("[Network] Back online; preserving clients and account cooldowns.")
                 was_offline = False
-                api = None
-                for runtime in runtimes:
-                    runtime.relogin()
 
             scraper_enabled = config.IS_ENABLED_REELS_SCRAPER == "1"
             poster_enabled = config.IS_ENABLED_AUTO_POSTER == "1"
@@ -434,7 +459,10 @@ def main() -> None:
                 if scraper_enabled and next_reels_scraper_run_at < datetime.now():
                     try:
                         log.info("[Scraper] Scraping reels...")
-                        run_scrape()
+                        if runtimes and all(distributor.pending_count(r.username) == 0 for r in runtimes):
+                            handle_exhaustion(runtimes)
+                        else:
+                            run_scrape()
                         next_reels_scraper_run_at = datetime.now() + timedelta(
                             seconds=int(config.SCRAPER_INTERVAL_IN_MIN) * 60
                         )
@@ -477,6 +505,7 @@ def main() -> None:
                 try:
                     log.info("[Purger] Running 10-hour scheduled purge...")
                     purger.purge_unposted()
+                    next_reels_scraper_run_at = datetime.now()
                     next_purge_run_at = datetime.now() + timedelta(hours=10)
                 except Exception as exc:
                     log.error(f"[Purger] Error: {type(exc).__name__}: {exc}")
