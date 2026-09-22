@@ -133,3 +133,19 @@ def repair_pending(limit=3):
             official.save(state_path,state)
             break
     return count
+
+
+def queue_url(url, username):
+    """Persist a known reel for the worker; never download in the web request."""
+    from db import Session, Reel
+    import delivery
+    code = shortcode(url.strip())
+    with Session() as session:
+        row = session.query(Reel).filter_by(code=code).first()
+        if delivery.blocked(username, code) or (row and row.is_posted):
+            raise ValueError('This reel already has a delivery record; it will not be reposted')
+        if row:
+            return False
+        session.add(Reel(code=code, account='', assigned_to=username, is_posted=False))
+        session.commit()
+    return True

@@ -36,6 +36,19 @@ class ReliabilityTests(unittest.TestCase):
             s.commit()
         return str(path)
 
+    def test_public_url_queue_is_durable_and_deduplicated(self):
+        import public_reels
+        with patch.object(public_reels, 'download') as download:
+            self.assertTrue(public_reels.queue_url('https://www.instagram.com/reel/Abc123/', 'a'))
+            self.assertFalse(public_reels.queue_url('https://www.instagram.com/reel/Abc123/', 'a'))
+            download.assert_not_called()
+        with Session() as session:
+            row = session.query(Reel).filter_by(code='Abc123').one()
+            self.assertEqual(row.assigned_to, 'a')
+            self.assertFalse(row.is_posted)
+        with self.assertRaises(ValueError):
+            public_reels.queue_url('https://example.com/reel/Abc123/', 'a')
+
     def test_saved_session_keeps_identity_without_password_login(self):
         p=Path(DATA.name)/'saved.json';p.write_text('{}')
         client=Mock()

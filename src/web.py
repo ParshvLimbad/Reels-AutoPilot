@@ -87,6 +87,11 @@ def official_api(username):
         if data.get('token'):
             official.connect(username, str(data['token']).strip())
             AccountManager.update_account(username, login_status='official', last_error='', next_login_at=None)
+        elif data.get('reel_url'):
+            import public_reels
+            if not official.connected(username):
+                raise ValueError('Connect the official API account first')
+            public_reels.queue_url(str(data['reel_url']), username)
         elif 'auto' in data:
             cover = str(data.get('cover', '')).strip()
             if cover:
