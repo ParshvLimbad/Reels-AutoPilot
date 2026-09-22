@@ -145,3 +145,6 @@ configs_export.json
 *.zip
 
 .official/
+
+.media/
+bin/cloudflared

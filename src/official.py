@@ -98,8 +98,71 @@ def status(username):
     return {'connected': connected(username), 'settings': read(folder(username) / 'settings.json'), 'jobs': [
         {k: j.get(k) for k in ('state', 'error', 'media_id', 'created')} for j in jobs]}
 
+def prefetch(username):
+    """Stage at most the current reel and one following reel, without publishing."""
+    directory = folder(username)
+    settings = read(directory / 'settings.json')
+    if not settings.get('auto'):
+        return
+    for _ in range(2):
+        jobs = sorted(directory.glob('job-*.json'), key=lambda p: read(p).get('created', 0))
+        active = [read(p) for p in jobs if read(p).get('state') in ('queued','processing','publishing')]
+        if len(active) >= 2:
+            return
+        import delivery
+        import media_host
+        from poster import build_caption, get_reel, resolve_cover_image
+        import helpers
+        reel = get_reel(assigned_to=username, exclude_codes={read(p).get("source_code") for p in jobs},
+                        rotation_after=active[-1].get("source_account") if active else None)
+        if reel is not None and not delivery.blocked(username, reel.code):
+            path = directory / ('job-' + __import__('hashlib').sha256(reel.code.encode()).hexdigest() + '.json')
+            if not path.exists():
+                video, video_ticket = media_host.stage(reel.file_path)
+                tickets = [video_ticket]
+                cover = settings.get('cover', '')
+                configured = helpers.get_config('REEL_COVER_PATH') or getattr(config, 'REEL_COVER_PATH', '')
+                if configured:
+                    image = resolve_cover_image(configured)
+                    if not image:
+                        raise ValueError('Configured cover file is missing')
+                    cover, ticket = media_host.stage(image)
+                    tickets.append(ticket)
+                enqueue(username, video, cover, build_caption(reel), reel.code)
+                job = read(path)
+                job['tickets'] = tickets
+                job['local_video'] = reel.file_path
+                job['source_account'] = reel.account
+                save(path, job)
+
+def finish_confirmed(username, path, job):
+    if job.get('cleanup_done'):
+        return
+    import media_host
+    if job.get('source_code'):
+        import delivery
+        from types import SimpleNamespace
+        from db import Session, Reel
+        from accounts import update_account
+        delivery.confirm(username, job['source_code'], SimpleNamespace(pk=job['media_id'], code=''))
+        with Session() as session:
+            reel = session.query(Reel).filter_by(code=job['source_code']).first()
+            if reel:
+                update_account(username, last_source=reel.account)
+    # Revoke only this delivery's links; keep the reusable configured cover.
+    media_host.revoke(job.get('tickets', []))
+    if job.get('local_video'):
+        import remover
+        remover.remove_file(job['local_video'])
+        remover.remove_file(job['local_video'] + '.jpg')
+    job['cleanup_done'] = True
+    save(path, job)
+
+
 def tick(username):
     """Advance one persisted job. Never resubmit an ambiguous publish request."""
+    import media_host
+    media_host.cleanup()
     directory = folder(username)
     credentials = read(directory / 'token.json')
     if not credentials:
@@ -111,24 +174,12 @@ def tick(username):
         credentials.update(token=refreshed['access_token'], saved=time.time())
         save(directory / 'token.json', credentials)
         token = credentials['token']
+    for saved in directory.glob('job-*.json'):
+        confirmed = read(saved)
+        if confirmed.get('state') == 'posted':
+            finish_confirmed(username, saved, confirmed)
+    prefetch(username)
     jobs = sorted(directory.glob('job-*.json'), key=lambda p: read(p).get('created', 0))
-    settings = read(directory / 'settings.json')
-    if settings.get('auto') and not any(read(p).get('state') not in ('posted', 'failed', 'uncertain') for p in jobs):
-        from db import Session, Reel
-        import delivery
-        from poster import build_caption
-        with Session() as session:
-            for reel in session.query(Reel).filter_by(assigned_to=username, is_posted=False).order_by(Reel.id):
-                if delivery.blocked(username, reel.code):
-                    continue
-                try:
-                    video = json.loads(reel.data or '{}').get('video_url')
-                    if video:
-                        enqueue(username, video, settings.get('cover', ''), build_caption(reel), reel.code)
-                        break
-                except (ValueError, TypeError):
-                    continue
-        jobs = sorted(directory.glob('job-*.json'), key=lambda p: read(p).get('created', 0))
     for path in jobs:
         job = read(path)
         if job['state'] in ('posted', 'failed', 'uncertain'):
@@ -141,6 +192,11 @@ def tick(username):
             return False
         try:
             if job['state'] == 'queued':
+                if job.get('tickets'):
+                    # Refresh only the host if a temporary tunnel restarted.
+                    job['video'] = media_host.origin() + '/m/' + job['video'].split('/m/',1)[1]
+                    if '/m/' in job.get('cover',''):
+                        job['cover'] = media_host.origin() + '/m/' + job['cover'].split('/m/',1)[1]
                 data = dict(media_type='REELS', video_url=job['video'], caption=job['caption'], share_to_feed='true')
                 if job['cover']:
                     data['cover_url'] = job['cover']
@@ -174,11 +230,13 @@ def tick(username):
                 raise APIError('Publish response had no media ID')
             job.update(state='posted', media_id=media_id, error='', posted=time.time())
             save(path, job)
-            if job.get('source_code'):
-                from types import SimpleNamespace
-                delivery.confirm(username, job['source_code'], SimpleNamespace(pk=media_id, code=''))
+            finish_confirmed(username, path, job)
+            prefetch(username)
             return True
         except Exception as exc:
+            if job['state'] == 'posted':
+                # Publication succeeded; retry local reconciliation on the next tick.
+                return True
             job.update(state='uncertain' if job['state']=='publishing' else 'failed',
                        error=str(exc) if isinstance(exc, APIError) else type(exc).__name__)
             save(path, job)

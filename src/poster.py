@@ -74,7 +74,7 @@ def get_video_duration(file_path: str) -> float:
 
 
 
-def get_reel(assigned_to: Optional[str] = None) -> Optional[Reel]:
+def get_reel(assigned_to: Optional[str] = None, exclude_codes=(), rotation_after=None) -> Optional[Reel]:
     """Return the next unposted reel with a valid file, ensuring source rotation.
 
     When `assigned_to` is given, only reels assigned to that posting account
@@ -89,6 +89,8 @@ def get_reel(assigned_to: Optional[str] = None) -> Optional[Reel]:
 
         valid_by_account: Dict[str, Reel] = {}
         for reel in unposted_reels:
+            if reel.code in exclude_codes:
+                continue
             if not reel.file_path or not os.path.exists(reel.file_path):
                 continue
             if assigned_to and delivery.blocked(assigned_to, reel.code):
@@ -102,7 +104,7 @@ def get_reel(assigned_to: Optional[str] = None) -> Optional[Reel]:
 
         from accounts import get_account
         record = get_account(assigned_to) if assigned_to else None
-        last_source = record.last_source if record else None
+        last_source = rotation_after if rotation_after is not None else (record.last_source if record else None)
 
         raw_sources = config.ACCOUNTS
         sources = [v.strip() for v in raw_sources.split(",") if v.strip()] if isinstance(raw_sources, str) else list(raw_sources)

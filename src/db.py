@@ -208,6 +208,8 @@ class ReelEncoder(json.JSONEncoder):
     """JSON encoder able to serialise instagrapi media objects."""
 
     def default(self, obj):
+        if type(obj).__name__ in ("Url", "AnyUrl", "HttpUrl", "AnyHttpUrl"):
+            return str(obj)
         if hasattr(obj, "dict"):
             return obj.dict()
         elif hasattr(obj, "model_dump"):

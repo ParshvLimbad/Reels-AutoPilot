@@ -126,6 +126,36 @@ class ReliabilityTests(unittest.TestCase):
             login.assert_not_called()
         self.assertEqual(accounts.get_account('a').next_login_at, until)
 
+    def test_official_two_reel_buffer_and_immediate_cleanup(self):
+        import official, media_host, json
+        self.account()
+        first=self.reel('buffer_a',source='source_a')
+        second=self.reel('buffer_b',source='source_b')
+        third=self.reel('buffer_c',source='source_a')
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            (root/'media').mkdir()
+            (root/'media'/'origin.json').write_text(json.dumps({'url':'https://test.example.com'}))
+            with patch.object(official,'ROOT',root/'official'), patch.object(media_host,'ROOT',root/'media'), patch.object(config,'REEL_COVER_PATH',''):
+                official.save(official.folder('a')/'settings.json',{'auto':True})
+                official.prefetch('a')
+                jobs=sorted(official.folder('a').glob('job-*'),key=lambda p:official.read(p)['created'])
+                self.assertEqual([official.read(p)['source_code'] for p in jobs],['buffer_a','buffer_b'])
+                official.prefetch('a')
+                self.assertEqual(len(list(official.folder('a').glob('job-*'))),2)
+                job=official.read(jobs[0]); ticket=job['tickets'][0]
+                self.assertTrue(delivery.claim('a','buffer_a'))
+                job.update(state='posted',media_id='123456')
+                official.save(jobs[0],job)
+                official.finish_confirmed('a',jobs[0],job)
+                self.assertFalse(Path(first).exists())
+                self.assertFalse((root/'media'/ticket).exists())
+                self.assertTrue(Path(second).exists())
+                official.finish_confirmed('a',jobs[0],official.read(jobs[0]))
+                official.prefetch('a')
+                active=[official.read(p)['source_code'] for p in official.folder('a').glob('job-*') if official.read(p)['state']=='queued']
+                self.assertEqual(set(active),{'buffer_b','buffer_c'})
+
     def test_delivery_claim_unique_per_destination(self):
         self.assertTrue(delivery.claim('a','r'))
         self.assertFalse(delivery.claim('a','r'))
