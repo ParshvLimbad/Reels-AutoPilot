@@ -172,8 +172,13 @@ def run_scrape(older=False) -> int:
     """Scrape all source accounts and distribute the new reels."""
     client = scraping_client()
     if client is None:
-        log.warning("[Scraper] No logged-in account available for scraping.")
-        return 0
+        import public_reels
+        count = public_reels.repair_pending(limit=3)
+        usernames = [runtime.username for runtime in pool.active()]
+        if usernames:
+            distributor.distribute_unassigned(usernames)
+        log.info("[Scraper] Recovered %s known reels via public downloader; profile discovery still needs a source client.", count)
+        return count
     set_status("scraping")
     try:
         new_reels = reels.main(client, older=older)

@@ -156,6 +156,27 @@ class ReliabilityTests(unittest.TestCase):
                 active=[official.read(p)['source_code'] for p in official.folder('a').glob('job-*') if official.read(p)['state']=='queued']
                 self.assertEqual(set(active),{'buffer_b','buffer_c'})
 
+    def test_public_downloader_stores_and_deduplicates(self):
+        import public_reels
+        self.account()
+        path=Path(config.DOWNLOAD_DIR)/'publictest.mp4';path.write_bytes(b'fixture')
+        item={'code':'publictest','pk':'42','user':{'username':'source_a'},'caption':{'text':'caption'},'video_versions':[{'url':'https://example.fbcdn.net/video'}]}
+        with patch.object(public_reels,'download',return_value=(item,str(path))) as download:
+            self.assertTrue(public_reels.import_url('https://www.instagram.com/reel/publictest/','a'))
+            self.assertFalse(public_reels.import_url('https://www.instagram.com/reel/publictest/','a'))
+            self.assertEqual(download.call_count,1)
+        with Session() as session:
+            row=session.query(Reel).filter_by(code='publictest').one()
+            self.assertEqual(row.assigned_to,'a')
+            self.assertFalse(row.is_posted)
+
+    def test_public_downloader_429_does_not_retry_or_login(self):
+        import public_reels
+        response=Mock(status_code=429)
+        with patch.object(public_reels.requests,'post',return_value=response) as post:
+            with self.assertRaises(public_reels.DownloadError):public_reels.fetch('validcode')
+            self.assertEqual(post.call_count,1)
+
     def test_delivery_claim_unique_per_destination(self):
         self.assertTrue(delivery.claim('a','r'))
         self.assertFalse(delivery.claim('a','r'))
